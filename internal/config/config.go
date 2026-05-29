@@ -7,7 +7,7 @@ type Config struct {
 
 func GetDefault () Config {
 	return Config {
-		Addr: "localhost",
+		Addr: "http://localhost",
 		Port: 8080,
 	}
 }
