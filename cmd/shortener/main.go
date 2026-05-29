@@ -20,7 +20,7 @@ func main() {
 
 	log.Printf("Serving on %s port %d", cfg.Addr, cfg.Port)
 
-	err := http.ListenAndServe(baseUrl, hlr.Router());
+	err := http.ListenAndServe(fmt.Sprintf(":%d", cfg.Port), hlr.Router());
 	if  err != nil {
 		log.Fatalf("Server error: %v", err)
 	}
