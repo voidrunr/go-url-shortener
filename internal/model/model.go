@@ -7,5 +7,5 @@ type Url struct {
 	Code		string
 	CreatedAt	time.Time
 	UpdatedAt	time.Time
-	ExpiresAt	time.Time
+	ExpiresAt	*time.Time
 }
