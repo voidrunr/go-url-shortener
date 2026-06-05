@@ -6,9 +6,9 @@ import (
 	"net/http"
 
 	"github.com/voidrunr/go-url-shortener/internal/config"
+	"github.com/voidrunr/go-url-shortener/internal/handler"
 	"github.com/voidrunr/go-url-shortener/internal/repository"
 	"github.com/voidrunr/go-url-shortener/internal/service"
-	"github.com/voidrunr/go-url-shortener/internal/handler"
 )
 
 func main() {
@@ -20,8 +20,8 @@ func main() {
 
 	log.Printf("Serving on %s port %d", cfg.Addr, cfg.Port)
 
-	err := http.ListenAndServe(fmt.Sprintf(":%d", cfg.Port), hlr.Router());
-	if  err != nil {
+	err := http.ListenAndServe(fmt.Sprintf(":%d", cfg.Port), hlr.Router())
+	if err != nil {
 		log.Fatalf("Server error: %v", err)
 	}
 }

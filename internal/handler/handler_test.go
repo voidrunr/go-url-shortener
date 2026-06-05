@@ -118,10 +118,10 @@ func TestHandleShorten_WrongPath(t *testing.T) {
 		want   want
 	}{
 		{
-			name:   "POST to non-root path returns 400",
+			name:   "POST to non-root path returns 405",
 			method: http.MethodPost,
 			path:   "/something",
-			want:   want{code: http.StatusBadRequest},
+			want:   want{code: http.StatusMethodNotAllowed},
 		},
 	}
 
@@ -183,10 +183,10 @@ func TestHandleResolve(t *testing.T) {
 			want: want{code: http.StatusBadRequest},
 		},
 		{
-			name: "nested path returns 400",
+			name: "nested path returns 404",
 			path: "/a/b",
 			svc:  &mockShortener{},
-			want: want{code: http.StatusBadRequest},
+			want: want{code: http.StatusNotFound},
 		},
 		{
 			name: "service error returns 500",
@@ -231,19 +231,19 @@ func TestRoute_UnsupportedMethods(t *testing.T) {
 		want   want
 	}{
 		{
-			name:   "PUT returns 400",
+			name:   "PUT returns 405",
 			method: http.MethodPut,
-			want:   want{code: http.StatusBadRequest},
+			want:   want{code: http.StatusMethodNotAllowed},
 		},
 		{
-			name:   "PATCH returns 400",
+			name:   "PATCH returns 405",
 			method: http.MethodPatch,
-			want:   want{code: http.StatusBadRequest},
+			want:   want{code: http.StatusMethodNotAllowed},
 		},
 		{
-			name:   "DELETE returns 400",
+			name:   "DELETE returns 405",
 			method: http.MethodDelete,
-			want:   want{code: http.StatusBadRequest},
+			want:   want{code: http.StatusMethodNotAllowed},
 		},
 	}
 

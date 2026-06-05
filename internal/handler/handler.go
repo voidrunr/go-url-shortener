@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/voidrunr/go-url-shortener/internal/repository"
 )
 
@@ -24,33 +26,16 @@ func New(svc Shortener) *URLHandler {
 	}
 }
 
-func (hlr *URLHandler) Router() *http.ServeMux {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", hlr.route)
-
-	return mux
+func (hlr *URLHandler) Router() http.Handler {
+	r := chi.NewRouter()
+	r.Post("/", hlr.handleShorten)
+	r.Get("/", hlr.handleEmptyCode)
+	r.Get("/{code}", hlr.handleResolve)
+	return r
 }
 
-func (hlr *URLHandler) route(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodPost:
-		if r.URL.Path != "/" {
-			http.Error(w, "Bad Request", http.StatusBadRequest)
-			return
-		}
-
-		hlr.handleShorten(w, r)
-	case http.MethodGet:
-		code := strings.TrimPrefix(r.URL.Path, "/")
-		if code == "" || strings.Contains(code, "/") {
-			http.Error(w, "Bad Request", http.StatusBadRequest)
-			return
-		}
-		hlr.handleResolve(w, r, code)
-
-	default:
-		http.Error(w, "Bad Request", http.StatusBadRequest)
-	}
+func (hlr *URLHandler) handleEmptyCode(w http.ResponseWriter, r *http.Request) {
+	http.Error(w, "Bad Request", http.StatusBadRequest)
 }
 
 func (hlr *URLHandler) handleShorten(w http.ResponseWriter, r *http.Request) {
@@ -72,7 +57,8 @@ func (hlr *URLHandler) handleShorten(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(shortURL))
 }
 
-func (hlr *URLHandler) handleResolve(w http.ResponseWriter, r *http.Request, code string) {
+func (hlr *URLHandler) handleResolve(w http.ResponseWriter, r *http.Request) {
+	code := chi.URLParam(r, "code")
 	originalUrl, err := hlr.svc.Resolve(code)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {

@@ -5,8 +5,8 @@ type Config struct {
 	Port int
 }
 
-func GetDefault () Config {
-	return Config {
+func GetDefault() Config {
+	return Config{
 		Addr: "http://localhost",
 		Port: 8080,
 	}
