@@ -6,6 +6,8 @@ import (
 	"github.com/voidrunr/go-url-shortener/internal/model"
 )
 
+var ErrNotFound = errors.New("url not found")
+
 type UrlRepository struct {
 	mutex	sync.RWMutex
 	store	map[string]model.Url
@@ -38,7 +40,7 @@ func (repo *UrlRepository) Get (code string) (model.Url, error) {
 	url, ok := repo.store[code]
 
 	if !ok {
-		return model.Url{}, errors.New("Url not found")
+		return model.Url{}, ErrNotFound
 	}
 
 	return url, nil

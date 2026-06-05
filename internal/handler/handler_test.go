@@ -1,17 +1,18 @@
 package handler_test
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"errors"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/voidrunr/go-url-shortener/internal/handler"
+	"github.com/voidrunr/go-url-shortener/internal/repository"
 )
 
 // --- mock ---
@@ -170,7 +171,7 @@ func TestHandleResolve(t *testing.T) {
 			path: "/unknown",
 			svc: &mockShortener{
 				resolveFn: func(string) (string, error) {
-					return "", errors.New("Url not found")
+					return "", repository.ErrNotFound
 				},
 			},
 			want: want{code: http.StatusBadRequest},

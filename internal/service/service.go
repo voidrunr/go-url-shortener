@@ -53,7 +53,7 @@ func (srv UrlService) Shorten (originalUrl string) (string, error) {
 	return fmt.Sprintf("%s/%s", srv.baseUrl, code), nil
 }
 
-func (srv UrlService) ResolveOrginal (code string) (string, error) {
+func (srv UrlService) Resolve (code string) (string, error) {
 	url, err := srv.repo.Get(code)
 	if err != nil {
 		return "", err

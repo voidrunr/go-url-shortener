@@ -1,17 +1,24 @@
 package handler
 
 import (
+	"errors"
 	"io"
 	"net/http"
 	"strings"
-	"github.com/voidrunr/go-url-shortener/internal/service"
+
+	"github.com/voidrunr/go-url-shortener/internal/repository"
 )
 
-type URLHandler struct {
-	svc *service.UrlService
+type Shortener interface {
+	Shorten(string) (string, error)
+	Resolve(string) (string, error)
 }
 
-func New(svc *service.UrlService) *URLHandler {
+type URLHandler struct {
+	svc Shortener
+}
+
+func New(svc Shortener) *URLHandler {
 	return &URLHandler{
 		svc: svc,
 	}
@@ -66,8 +73,12 @@ func (hlr *URLHandler) handleShorten(w http.ResponseWriter, r *http.Request) {
 }
 
 func (hlr *URLHandler) handleResolve(w http.ResponseWriter, r *http.Request, code string) {
-	originalUrl, err := hlr.svc.ResolveOrginal(code)
+	originalUrl, err := hlr.svc.Resolve(code)
 	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			http.Error(w, "Not Found", http.StatusBadRequest)
+			return
+		}
 		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
 		return
 	}
