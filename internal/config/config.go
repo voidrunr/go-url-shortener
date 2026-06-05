@@ -1,13 +1,18 @@
 package config
 
+import "flag"
+
 type Config struct {
-	Addr string
-	Port int
+	ServerAddress string
+	BaseURL       string
 }
 
-func GetDefault() Config {
-	return Config{
-		Addr: "http://localhost",
-		Port: 8080,
-	}
+func Parse() Config {
+	cfg := Config{}
+
+	flag.StringVar(&cfg.ServerAddress, "a", "localhost:8080", "address to run HTTP server on")
+	flag.StringVar(&cfg.BaseURL, "b", "http://localhost:8080", "base URL for shortened links")
+	flag.Parse()
+
+	return cfg
 }

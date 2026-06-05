@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"log"
 	"net/http"
 
@@ -12,15 +11,14 @@ import (
 )
 
 func main() {
-	cfg := config.GetDefault()
+	cfg := config.Parse()
 	repo := repository.New()
-	baseUrl := fmt.Sprintf("%s:%d", cfg.Addr, cfg.Port)
-	svc := service.New(repo, baseUrl)
+	svc := service.New(repo, cfg.BaseURL)
 	hlr := handler.New(svc)
 
-	log.Printf("Serving on %s port %d", cfg.Addr, cfg.Port)
+	log.Printf("Serving on %s", cfg.ServerAddress)
 
-	err := http.ListenAndServe(fmt.Sprintf(":%d", cfg.Port), hlr.Router())
+	err := http.ListenAndServe(cfg.ServerAddress, hlr.Router())
 	if err != nil {
 		log.Fatalf("Server error: %v", err)
 	}
