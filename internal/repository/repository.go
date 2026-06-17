@@ -1,46 +1,44 @@
 package repository
 
 import (
-	"errors"
 	"github.com/voidrunr/go-url-shortener/internal/model"
+	"github.com/voidrunr/go-url-shortener/internal/service"
 	"sync"
 )
 
-var ErrNotFound = errors.New("url not found")
-
-type UrlRepository struct {
+type URLRepository struct {
 	mutex sync.RWMutex
-	store map[string]model.Url
+	store map[string]model.URL
 }
 
-func New() *UrlRepository {
-	return &UrlRepository{
-		store: make(map[string]model.Url),
+func New() *URLRepository {
+	return &URLRepository{
+		store: make(map[string]model.URL),
 	}
 }
 
-func (repo *UrlRepository) Write(url model.Url) {
+func (repo *URLRepository) Write(url model.URL) {
 	repo.mutex.Lock()
 	defer repo.mutex.Unlock()
 
 	repo.store[url.Code] = url
 }
 
-func (repo *UrlRepository) Delete(url model.Url) {
+func (repo *URLRepository) Delete(url model.URL) {
 	repo.mutex.Lock()
 	defer repo.mutex.Unlock()
 
 	delete(repo.store, url.Code)
 }
 
-func (repo *UrlRepository) Get(code string) (model.Url, error) {
-	repo.mutex.Lock()
-	defer repo.mutex.Unlock()
+func (repo *URLRepository) Get(code string) (model.URL, error) {
+	repo.mutex.RLock()
+	defer repo.mutex.RUnlock()
 
 	url, ok := repo.store[code]
 
 	if !ok {
-		return model.Url{}, ErrNotFound
+		return model.URL{}, service.ErrNotFound
 	}
 
 	return url, nil

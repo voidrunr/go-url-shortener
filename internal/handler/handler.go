@@ -8,7 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/voidrunr/go-url-shortener/internal/repository"
+	"github.com/voidrunr/go-url-shortener/internal/service"
 )
 
 type Shortener interface {
@@ -35,20 +35,20 @@ func (hlr *URLHandler) Router() http.Handler {
 }
 
 func (hlr *URLHandler) handleEmptyCode(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "Bad Request", http.StatusBadRequest)
+	http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 }
 
 func (hlr *URLHandler) handleShorten(w http.ResponseWriter, r *http.Request) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil || len(strings.TrimSpace(string(body))) == 0 {
-		http.Error(w, "Bad Request", http.StatusBadRequest)
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
 	originalURL := strings.TrimSpace(string(body))
 	shortURL, err := hlr.svc.Shorten(originalURL)
 	if err != nil {
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
@@ -59,15 +59,15 @@ func (hlr *URLHandler) handleShorten(w http.ResponseWriter, r *http.Request) {
 
 func (hlr *URLHandler) handleResolve(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
-	originalUrl, err := hlr.svc.Resolve(code)
+	originalURL, err := hlr.svc.Resolve(code)
 	if err != nil {
-		if errors.Is(err, repository.ErrNotFound) {
-			http.Error(w, "Not Found", http.StatusBadRequest)
+		if errors.Is(err, service.ErrNotFound) {
+			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 			return
 		}
-		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
-	http.Redirect(w, r, originalUrl, http.StatusTemporaryRedirect)
+	http.Redirect(w, r, originalURL, http.StatusTemporaryRedirect)
 }

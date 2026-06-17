@@ -2,7 +2,7 @@ package model
 
 import "time"
 
-type Url struct {
+type URL struct {
 	Original  string
 	Code      string
 	CreatedAt time.Time

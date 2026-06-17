@@ -1,7 +1,6 @@
 package handler_test
 
 import (
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,18 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/voidrunr/go-url-shortener/internal/handler"
-	"github.com/voidrunr/go-url-shortener/internal/repository"
+	"github.com/voidrunr/go-url-shortener/internal/handler/mocks"
+	"github.com/voidrunr/go-url-shortener/internal/service"
 )
-
-// --- mock ---
-
-type mockShortener struct {
-	shortenFn func(string) (string, error)
-	resolveFn func(string) (string, error)
-}
-
-func (m *mockShortener) Shorten(url string) (string, error) { return m.shortenFn(url) }
-func (m *mockShortener) Resolve(id string) (string, error)  { return m.resolveFn(id) }
 
 func newHandler(svc handler.Shortener) http.Handler {
 	return handler.New(svc).Router()
@@ -38,18 +28,16 @@ func TestHandleShorten(t *testing.T) {
 		contentType string
 	}
 	tests := []struct {
-		name string
-		body string
-		svc  handler.Shortener
-		want want
+		name  string
+		body  string
+		setup func(*mocks.Shortener)
+		want  want
 	}{
 		{
 			name: "valid URL returns 201 and short URL",
 			body: "https://practicum.yandex.ru/",
-			svc: &mockShortener{
-				shortenFn: func(string) (string, error) {
-					return "http://localhost:8080/EwHXdJfB", nil
-				},
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().Shorten("https://practicum.yandex.ru/").Return("http://localhost:8080/EwHXdJfB", nil)
 			},
 			want: want{
 				code:        http.StatusCreated,
@@ -60,22 +48,18 @@ func TestHandleShorten(t *testing.T) {
 		{
 			name: "empty body returns 400",
 			body: "",
-			svc:  &mockShortener{},
 			want: want{code: http.StatusBadRequest},
 		},
 		{
 			name: "whitespace-only body returns 400",
 			body: "   \n",
-			svc:  &mockShortener{},
 			want: want{code: http.StatusBadRequest},
 		},
 		{
 			name: "service error returns 500",
 			body: "https://example.com",
-			svc: &mockShortener{
-				shortenFn: func(string) (string, error) {
-					return "", io.ErrUnexpectedEOF
-				},
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().Shorten("https://example.com").Return("", io.ErrUnexpectedEOF)
 			},
 			want: want{code: http.StatusInternalServerError},
 		},
@@ -83,11 +67,16 @@ func TestHandleShorten(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			svc := mocks.NewShortener(t)
+			if tt.setup != nil {
+				tt.setup(svc)
+			}
+
 			req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(tt.body))
 			req.Header.Set("Content-Type", "text/plain")
 			w := httptest.NewRecorder()
 
-			newHandler(tt.svc).ServeHTTP(w, req)
+			newHandler(svc).ServeHTTP(w, req)
 
 			res := w.Result()
 			defer res.Body.Close()
@@ -130,7 +119,7 @@ func TestHandleShorten_WrongPath(t *testing.T) {
 			req := httptest.NewRequest(tt.method, tt.path, strings.NewReader("https://example.com"))
 			w := httptest.NewRecorder()
 
-			newHandler(&mockShortener{}).ServeHTTP(w, req)
+			newHandler(mocks.NewShortener(t)).ServeHTTP(w, req)
 
 			assert.Equal(t, tt.want.code, w.Code)
 		})
@@ -145,21 +134,16 @@ func TestHandleResolve(t *testing.T) {
 		location string
 	}
 	tests := []struct {
-		name string
-		path string
-		svc  handler.Shortener
-		want want
+		name  string
+		path  string
+		setup func(*mocks.Shortener)
+		want  want
 	}{
 		{
 			name: "known ID returns 307 with Location header",
 			path: "/EwHXdJfB",
-			svc: &mockShortener{
-				resolveFn: func(id string) (string, error) {
-					if id == "EwHXdJfB" {
-						return "https://practicum.yandex.ru/", nil
-					}
-					return "", errors.New("Url not found")
-				},
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().Resolve("EwHXdJfB").Return("https://practicum.yandex.ru/", nil)
 			},
 			want: want{
 				code:     http.StatusTemporaryRedirect,
@@ -169,32 +153,26 @@ func TestHandleResolve(t *testing.T) {
 		{
 			name: "unknown ID returns 400",
 			path: "/unknown",
-			svc: &mockShortener{
-				resolveFn: func(string) (string, error) {
-					return "", repository.ErrNotFound
-				},
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().Resolve("unknown").Return("", service.ErrNotFound)
 			},
 			want: want{code: http.StatusBadRequest},
 		},
 		{
 			name: "empty ID (GET /) returns 400",
 			path: "/",
-			svc:  &mockShortener{},
 			want: want{code: http.StatusBadRequest},
 		},
 		{
 			name: "nested path returns 404",
 			path: "/a/b",
-			svc:  &mockShortener{},
 			want: want{code: http.StatusNotFound},
 		},
 		{
 			name: "service error returns 500",
 			path: "/EwHXdJfB",
-			svc: &mockShortener{
-				resolveFn: func(string) (string, error) {
-					return "", io.ErrUnexpectedEOF
-				},
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().Resolve("EwHXdJfB").Return("", io.ErrUnexpectedEOF)
 			},
 			want: want{code: http.StatusInternalServerError},
 		},
@@ -202,10 +180,15 @@ func TestHandleResolve(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			svc := mocks.NewShortener(t)
+			if tt.setup != nil {
+				tt.setup(svc)
+			}
+
 			req := httptest.NewRequest(http.MethodGet, tt.path, nil)
 			w := httptest.NewRecorder()
 
-			newHandler(tt.svc).ServeHTTP(w, req)
+			newHandler(svc).ServeHTTP(w, req)
 
 			res := w.Result()
 			defer res.Body.Close()
@@ -252,7 +235,7 @@ func TestRoute_UnsupportedMethods(t *testing.T) {
 			req := httptest.NewRequest(tt.method, "/", nil)
 			w := httptest.NewRecorder()
 
-			newHandler(&mockShortener{}).ServeHTTP(w, req)
+			newHandler(mocks.NewShortener(t)).ServeHTTP(w, req)
 
 			assert.Equal(t, tt.want.code, w.Code)
 		})
