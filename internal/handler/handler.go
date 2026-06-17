@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/voidrunr/go-url-shortener/internal/middleware"
 	"github.com/voidrunr/go-url-shortener/internal/service"
 )
 
@@ -28,6 +29,7 @@ func New(svc Shortener) *URLHandler {
 
 func (hlr *URLHandler) Router() http.Handler {
 	r := chi.NewRouter()
+	r.Use(middleware.Logging)
 	r.Post("/", hlr.handleShorten)
 	r.Get("/", hlr.handleEmptyCode)
 	r.Get("/{code}", hlr.handleResolve)
