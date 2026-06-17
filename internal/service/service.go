@@ -3,6 +3,7 @@ package service
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
 	"net/url"
 	"time"
@@ -42,6 +43,17 @@ func generateCode(n int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b)[:n], nil
 }
 
+func generateUUID() (string, error) {
+	b := make([]byte, 16)
+
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(b), nil
+}
+
 func (srv URLService) Shorten(originalURL string) (string, error) {
 	unlimited := srv.collisionRetries <= 0
 
@@ -64,7 +76,13 @@ func (srv URLService) Shorten(originalURL string) (string, error) {
 
 	now := time.Now()
 
+	uuid, err := generateUUID()
+	if err != nil {
+		return "", err
+	}
+
 	u := model.URL{
+		UUID:      uuid,
 		Original:  originalURL,
 		Code:      code,
 		CreatedAt: now,

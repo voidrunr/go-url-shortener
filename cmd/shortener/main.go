@@ -12,7 +12,7 @@ import (
 
 func main() {
 	cfg := config.Parse()
-	repo := repository.New()
+	repo := repository.New(cfg.FileStoragePath)
 	svc := service.New(repo, cfg.BaseURL, cfg.CollisionRetries)
 	hlr := handler.New(svc)
 

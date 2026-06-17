@@ -3,9 +3,10 @@ package model
 import "time"
 
 type URL struct {
-	Original  string
-	Code      string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	ExpiresAt *time.Time
+	UUID      string     `json:"uuid"`
+	Original  string     `json:"original_url"`
+	Code      string     `json:"short_url"`
+	CreatedAt time.Time  `json:"-"`
+	UpdatedAt time.Time  `json:"-"`
+	ExpiresAt *time.Time `json:"-"`
 }
