@@ -18,14 +18,16 @@ type Repository interface {
 }
 
 type URLService struct {
-	repo    Repository
-	baseURL string
+	repo             Repository
+	baseURL          string
+	collisionRetries int
 }
 
-func New(repo Repository, baseURL string) *URLService {
+func New(repo Repository, baseURL string, collisionRetries int) *URLService {
 	return &URLService{
-		repo:    repo,
-		baseURL: baseURL,
+		repo:             repo,
+		baseURL:          baseURL,
+		collisionRetries: collisionRetries,
 	}
 }
 
@@ -41,9 +43,23 @@ func generateCode(n int) (string, error) {
 }
 
 func (srv URLService) Shorten(originalURL string) (string, error) {
-	code, err := generateCode(6)
-	if err != nil {
-		return "", err
+	unlimited := srv.collisionRetries <= 0
+
+	var code string
+	for i := 0; unlimited || i < srv.collisionRetries; i++ {
+		var err error
+		code, err = generateCode(6)
+		if err != nil {
+			return "", err
+		}
+
+		_, err = srv.repo.Get(code)
+		if errors.Is(err, ErrNotFound) {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
 	}
 
 	now := time.Now()

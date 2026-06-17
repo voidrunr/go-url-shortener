@@ -13,7 +13,7 @@ import (
 func main() {
 	cfg := config.Parse()
 	repo := repository.New()
-	svc := service.New(repo, cfg.BaseURL)
+	svc := service.New(repo, cfg.BaseURL, cfg.CollisionRetries)
 	hlr := handler.New(svc)
 
 	log.Printf("Serving on %s", cfg.ServerAddress)
