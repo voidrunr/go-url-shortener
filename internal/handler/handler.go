@@ -31,6 +31,7 @@ func New(svc Shortener) *URLHandler {
 func (hlr *URLHandler) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logging)
+	r.Use(middleware.Gzip)
 	r.Post("/", hlr.handleShorten)
 	r.Post("/api/shorten", hlr.handleAPIShorten)
 	r.Get("/", hlr.handleEmptyCode)
