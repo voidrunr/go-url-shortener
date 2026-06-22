@@ -24,6 +24,11 @@ format:
 clean:
 	rm -rf $(BUILD_DIR)
 
+MOCKERY := $(shell go env GOPATH)/bin/mockery
+
+mock:
+	$(MOCKERY) --name Shortener --dir internal/handler --output internal/handler/mocks
+
 help:
 	@echo "Usage: make <target>"
 	@echo ""
