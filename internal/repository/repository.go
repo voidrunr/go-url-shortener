@@ -17,11 +17,16 @@ func New() *URLRepository {
 	}
 }
 
-func (repo *URLRepository) Write(url model.URL) {
+func (repo *URLRepository) Write(url model.URL) error {
 	repo.mutex.Lock()
 	defer repo.mutex.Unlock()
 
+	if _, ok := repo.store[url.Code]; ok {
+		return service.ErrConflict
+	}
+
 	repo.store[url.Code] = url
+	return nil
 }
 
 func (repo *URLRepository) Delete(url model.URL) {
