@@ -27,7 +27,7 @@ clean:
 MOCKERY := $(shell go env GOPATH)/bin/mockery
 
 mock:
-	$(MOCKERY) --name Shortener --dir internal/handler --output internal/handler/mocks
+	$(MOCKERY) --config .mockery.yaml
 
 help:
 	@echo "Usage: make <target>"

@@ -1,3 +1,11 @@
-with-expecter: true
-#filename: "mock_{{.InterfaceName}}.go"
-case: snake
+template: testify
+template-data:
+  unroll-variadic: true
+packages:
+  github.com/voidrunr/go-url-shortener/internal/handler:
+    interfaces:
+      Shortener:
+        config:
+          dir: internal/handler/mocks
+          filename: "{{ .InterfaceName | kebabcase }}_mock.go"
+          pkgname: mocks
