@@ -8,11 +8,7 @@ import (
 	"time"
 
 	"github.com/voidrunr/go-url-shortener/internal/model"
-)
-
-var (
-	ErrNotFound = errors.New("url not found")
-	ErrConflict = errors.New("code already exists")
+	"github.com/voidrunr/go-url-shortener/internal/repository"
 )
 
 type Repository interface {
@@ -66,7 +62,7 @@ func (srv URLService) Shorten(originalURL string) (string, error) {
 		if err == nil {
 			return url.JoinPath(srv.baseURL, code)
 		}
-		if errors.Is(err, ErrConflict) {
+		if errors.Is(err, repository.ErrConflict) {
 			continue
 		}
 		return "", err
@@ -78,8 +74,8 @@ func (srv URLService) Shorten(originalURL string) (string, error) {
 func (srv URLService) Resolve(code string) (string, error) {
 	url, err := srv.repo.Get(code)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return "", ErrNotFound
+		if errors.Is(err, repository.ErrNotFound) {
+			return "", repository.ErrNotFound
 		}
 		return "", err
 	}
