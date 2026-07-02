@@ -12,7 +12,7 @@ import (
 
 	"github.com/voidrunr/go-url-shortener/internal/handler"
 	"github.com/voidrunr/go-url-shortener/internal/handler/mocks"
-	"github.com/voidrunr/go-url-shortener/internal/service"
+	"github.com/voidrunr/go-url-shortener/internal/repository"
 )
 
 func newHandler(svc handler.Shortener) http.Handler {
@@ -151,12 +151,12 @@ func TestHandleResolve(t *testing.T) {
 			},
 		},
 		{
-			name: "unknown ID returns 400",
+			name: "unknown ID returns 404",
 			path: "/unknown",
 			setup: func(m *mocks.Shortener) {
-				m.EXPECT().Resolve("unknown").Return("", service.ErrNotFound)
+				m.EXPECT().Resolve("unknown").Return("", repository.ErrNotFound)
 			},
-			want: want{code: http.StatusBadRequest},
+			want: want{code: http.StatusNotFound},
 		},
 		{
 			name: "empty ID (GET /) returns 400",

@@ -8,12 +8,11 @@ import (
 	"time"
 
 	"github.com/voidrunr/go-url-shortener/internal/model"
+	"github.com/voidrunr/go-url-shortener/internal/repository"
 )
 
-var ErrNotFound = errors.New("url not found")
-
 type Repository interface {
-	Write(model.URL)
+	Write(model.URL) error
 	Get(string) (model.URL, error)
 }
 
@@ -45,42 +44,38 @@ func generateCode(n int) (string, error) {
 func (srv URLService) Shorten(originalURL string) (string, error) {
 	unlimited := srv.collisionRetries <= 0
 
-	var code string
 	for i := 0; unlimited || i < srv.collisionRetries; i++ {
-		var err error
-		code, err = generateCode(6)
+		code, err := generateCode(6)
 		if err != nil {
 			return "", err
 		}
 
-		_, err = srv.repo.Get(code)
-		if errors.Is(err, ErrNotFound) {
-			break
+		now := time.Now()
+		u := model.URL{
+			Original:  originalURL,
+			Code:      code,
+			CreatedAt: now,
+			UpdatedAt: now,
 		}
-		if err != nil {
-			return "", err
+
+		err = srv.repo.Write(u)
+		if err == nil {
+			return url.JoinPath(srv.baseURL, code)
 		}
+		if errors.Is(err, repository.ErrConflict) {
+			continue
+		}
+		return "", err
 	}
 
-	now := time.Now()
-
-	u := model.URL{
-		Original:  originalURL,
-		Code:      code,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-
-	srv.repo.Write(u)
-
-	return url.JoinPath(srv.baseURL, code)
+	return "", errors.New("failed to generate unique code after max retries")
 }
 
 func (srv URLService) Resolve(code string) (string, error) {
 	url, err := srv.repo.Get(code)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return "", ErrNotFound
+		if errors.Is(err, repository.ErrNotFound) {
+			return "", repository.ErrNotFound
 		}
 		return "", err
 	}
