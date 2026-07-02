@@ -9,12 +9,11 @@ import (
 	"time"
 
 	"github.com/voidrunr/go-url-shortener/internal/model"
+	"github.com/voidrunr/go-url-shortener/internal/repository"
 )
 
-var ErrNotFound = errors.New("url not found")
-
 type Repository interface {
-	Write(model.URL)
+	Write(model.URL) error
 	Get(string) (model.URL, error)
 }
 
@@ -66,7 +65,7 @@ func (srv URLService) Shorten(originalURL string) (string, error) {
 		}
 
 		_, err = srv.repo.Get(code)
-		if errors.Is(err, ErrNotFound) {
+		if errors.Is(err, repository.ErrNotFound) {
 			break
 		}
 		if err != nil {
@@ -97,8 +96,8 @@ func (srv URLService) Shorten(originalURL string) (string, error) {
 func (srv URLService) Resolve(code string) (string, error) {
 	url, err := srv.repo.Get(code)
 	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			return "", ErrNotFound
+		if errors.Is(err, repository.ErrNotFound) {
+			return "", repository.ErrNotFound
 		}
 		return "", err
 	}

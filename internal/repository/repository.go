@@ -6,8 +6,13 @@ import (
 	"os"
 	"sync"
 
+	"errors"
 	"github.com/voidrunr/go-url-shortener/internal/model"
-	"github.com/voidrunr/go-url-shortener/internal/service"
+)
+
+var (
+	ErrNotFound = errors.New("url not found")
+	ErrConflict = errors.New("code already exists")
 )
 
 type URLRepository struct {
@@ -25,12 +30,18 @@ func New(filePath string) *URLRepository {
 	return repo
 }
 
-func (repo *URLRepository) Write(url model.URL) {
+func (repo *URLRepository) Write(url model.URL) error {
 	repo.mutex.Lock()
 	defer repo.mutex.Unlock()
 
+	if _, ok := repo.store[url.Code]; ok {
+		return ErrConflict
+	}
+
 	repo.store[url.Code] = url
 	repo.saveToFile()
+
+	return nil
 }
 
 func (repo *URLRepository) Delete(url model.URL) {
@@ -48,7 +59,7 @@ func (repo *URLRepository) Get(code string) (model.URL, error) {
 	url, ok := repo.store[code]
 
 	if !ok {
-		return model.URL{}, service.ErrNotFound
+		return model.URL{}, ErrNotFound
 	}
 
 	return url, nil
