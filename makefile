@@ -24,6 +24,11 @@ format:
 clean:
 	rm -rf $(BUILD_DIR)
 
+MOCKERY := $(shell go env GOPATH)/bin/mockery
+
+mock:
+	$(MOCKERY) --config .mockery.yaml
+
 help:
 	@echo "Usage: make <target>"
 	@echo ""
