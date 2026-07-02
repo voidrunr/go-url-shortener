@@ -10,7 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/voidrunr/go-url-shortener/internal/middleware"
-	"github.com/voidrunr/go-url-shortener/internal/service"
+	"github.com/voidrunr/go-url-shortener/internal/repository"
 )
 
 type Shortener interface {
@@ -94,8 +94,8 @@ func (hlr *URLHandler) handleResolve(w http.ResponseWriter, r *http.Request) {
 	code := chi.URLParam(r, "code")
 	originalURL, err := hlr.svc.Resolve(code)
 	if err != nil {
-		if errors.Is(err, service.ErrNotFound) {
-			http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		if errors.Is(err, repository.ErrNotFound) {
+			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return
 		}
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
