@@ -9,6 +9,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/rs/zerolog/log"
 	"github.com/voidrunr/go-url-shortener/internal/middleware"
 	"github.com/voidrunr/go-url-shortener/internal/repository"
 )
@@ -87,7 +88,9 @@ func (hlr *URLHandler) handleAPIShorten(w http.ResponseWriter, r *http.Request) 
 	resp := shortenResponse{Result: shortURL}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(resp)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Error().Err(err).Msg("failed to encode response")
+	}
 }
 
 func (hlr *URLHandler) handleResolve(w http.ResponseWriter, r *http.Request) {

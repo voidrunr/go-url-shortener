@@ -12,13 +12,16 @@ import (
 
 func main() {
 	cfg := config.Parse()
-	repo := repository.New(cfg.FileStoragePath)
+	repo, err := repository.New(cfg.FileStoragePath)
+	if err != nil {
+		log.Fatalf("Failed to create repository: %v", err)
+	}
 	svc := service.New(repo, cfg.BaseURL, cfg.CollisionRetries)
 	hlr := handler.New(svc)
 
 	log.Printf("Serving on %s", cfg.ServerAddress)
 
-	err := http.ListenAndServe(cfg.ServerAddress, hlr.Router())
+	err = http.ListenAndServe(cfg.ServerAddress, hlr.Router())
 	if err != nil {
 		log.Fatalf("Server error: %v", err)
 	}

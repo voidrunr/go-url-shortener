@@ -2,7 +2,6 @@ package repository
 
 import (
 	"encoding/json"
-	"log"
 	"os"
 	"sync"
 
@@ -21,13 +20,15 @@ type URLRepository struct {
 	filePath string
 }
 
-func New(filePath string) *URLRepository {
+func New(filePath string) (*URLRepository, error) {
 	repo := &URLRepository{
 		store:    make(map[string]model.URL),
 		filePath: filePath,
 	}
-	repo.loadFromFile()
-	return repo
+	if err := repo.loadFromFile(); err != nil {
+		return nil, err
+	}
+	return repo, nil
 }
 
 func (repo *URLRepository) Write(url model.URL) error {
@@ -39,17 +40,15 @@ func (repo *URLRepository) Write(url model.URL) error {
 	}
 
 	repo.store[url.Code] = url
-	repo.saveToFile()
-
-	return nil
+	return repo.saveToFile()
 }
 
-func (repo *URLRepository) Delete(url model.URL) {
+func (repo *URLRepository) Delete(url model.URL) error {
 	repo.mutex.Lock()
 	defer repo.mutex.Unlock()
 
 	delete(repo.store, url.Code)
-	repo.saveToFile()
+	return repo.saveToFile()
 }
 
 func (repo *URLRepository) Get(code string) (model.URL, error) {
@@ -65,7 +64,7 @@ func (repo *URLRepository) Get(code string) (model.URL, error) {
 	return url, nil
 }
 
-func (repo *URLRepository) saveToFile() {
+func (repo *URLRepository) saveToFile() error {
 	urls := make([]model.URL, 0, len(repo.store))
 	for _, url := range repo.store {
 		urls = append(urls, url)
@@ -73,32 +72,28 @@ func (repo *URLRepository) saveToFile() {
 
 	data, err := json.MarshalIndent(urls, "", "  ")
 	if err != nil {
-		log.Printf("Failed to marshal URLs: %v", err)
-		return
+		return err
 	}
 
-	if err := os.WriteFile(repo.filePath, data, 0644); err != nil {
-		log.Printf("Failed to write URLs to file: %v", err)
-	}
+	return os.WriteFile(repo.filePath, data, 0644)
 }
 
-func (repo *URLRepository) loadFromFile() {
+func (repo *URLRepository) loadFromFile() error {
 	data, err := os.ReadFile(repo.filePath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return
+			return nil
 		}
-		log.Printf("Failed to read URLs file: %v", err)
-		return
+		return err
 	}
 
 	var urls []model.URL
 	if err := json.Unmarshal(data, &urls); err != nil {
-		log.Printf("Failed to unmarshal URLs: %v", err)
-		return
+		return err
 	}
 
 	for _, url := range urls {
 		repo.store[url.Code] = url
 	}
+	return nil
 }

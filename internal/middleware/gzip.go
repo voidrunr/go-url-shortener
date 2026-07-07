@@ -12,7 +12,21 @@ type compressResponseWriter struct {
 	writer *gzip.Writer
 }
 
+func (crw *compressResponseWriter) gzip() bool {
+	ct := crw.Header().Get("Content-Type")
+	if !strings.Contains(ct, "application/json") && !strings.Contains(ct, "text/html") {
+		return false
+	}
+	crw.writer = gzip.NewWriter(crw.ResponseWriter)
+	crw.Header().Del("Content-Length")
+	crw.Header().Set("Content-Encoding", "gzip")
+	return true
+}
+
 func (crw *compressResponseWriter) Write(p []byte) (int, error) {
+	if crw.writer == nil {
+		crw.gzip()
+	}
 	if crw.writer != nil {
 		return crw.writer.Write(p)
 	}
@@ -20,12 +34,7 @@ func (crw *compressResponseWriter) Write(p []byte) (int, error) {
 }
 
 func (crw *compressResponseWriter) WriteHeader(code int) {
-	ct := crw.Header().Get("Content-Type")
-	if strings.Contains(ct, "application/json") || strings.Contains(ct, "text/html") {
-		crw.writer = gzip.NewWriter(crw.ResponseWriter)
-		crw.Header().Del("Content-Length")
-		crw.Header().Set("Content-Encoding", "gzip")
-	}
+	crw.gzip()
 	crw.ResponseWriter.WriteHeader(code)
 }
 

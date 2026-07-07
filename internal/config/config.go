@@ -21,16 +21,15 @@ func Parse() Config {
 	flag.StringVar(&cfg.FileStoragePath, "f", "data.json", "file path for URL storage")
 	flag.Parse()
 
-	if envServerAddress := os.Getenv("SERVER_ADDRESS"); envServerAddress != "" {
-		cfg.ServerAddress = envServerAddress
+	env := map[string]*string{
+		"SERVER_ADDRESS":    &cfg.ServerAddress,
+		"BASE_URL":          &cfg.BaseURL,
+		"FILE_STORAGE_PATH": &cfg.FileStoragePath,
 	}
-
-	if envBaseURL := os.Getenv("BASE_URL"); envBaseURL != "" {
-		cfg.BaseURL = envBaseURL
-	}
-
-	if envFileStoragePath := os.Getenv("FILE_STORAGE_PATH"); envFileStoragePath != "" {
-		cfg.FileStoragePath = envFileStoragePath
+	for name, target := range env {
+		if val := os.Getenv(name); val != "" {
+			*target = val
+		}
 	}
 
 	return cfg

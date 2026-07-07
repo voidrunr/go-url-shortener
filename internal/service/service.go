@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/url"
 	"time"
 
@@ -56,41 +57,45 @@ func generateUUID() (string, error) {
 func (srv URLService) Shorten(originalURL string) (string, error) {
 	unlimited := srv.collisionRetries <= 0
 
-	var code string
 	for i := 0; unlimited || i < srv.collisionRetries; i++ {
-		var err error
-		code, err = generateCode(6)
+		code, err := generateCode(6)
 		if err != nil {
 			return "", err
 		}
 
 		_, err = srv.repo.Get(code)
-		if errors.Is(err, repository.ErrNotFound) {
-			break
-		}
-		if err != nil {
+		if err != nil && !errors.Is(err, repository.ErrNotFound) {
 			return "", err
 		}
+
+		if errors.Is(err, repository.ErrNotFound) {
+			now := time.Now()
+
+			uuid, err := generateUUID()
+			if err != nil {
+				return "", err
+			}
+
+			u := model.URL{
+				UUID:      uuid,
+				Original:  originalURL,
+				Code:      code,
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+
+			if err := srv.repo.Write(u); err != nil {
+				if errors.Is(err, repository.ErrConflict) {
+					continue
+				}
+				return "", err
+			}
+
+			return url.JoinPath(srv.baseURL, code)
+		}
 	}
 
-	now := time.Now()
-
-	uuid, err := generateUUID()
-	if err != nil {
-		return "", err
-	}
-
-	u := model.URL{
-		UUID:      uuid,
-		Original:  originalURL,
-		Code:      code,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
-
-	srv.repo.Write(u)
-
-	return url.JoinPath(srv.baseURL, code)
+	return "", fmt.Errorf("failed to generate unique code after %d attempts", srv.collisionRetries)
 }
 
 func (srv URLService) Resolve(code string) (string, error) {
