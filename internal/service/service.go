@@ -3,7 +3,9 @@ package service
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"errors"
+	"fmt"
 	"net/url"
 	"time"
 
@@ -41,6 +43,17 @@ func generateCode(n int) (string, error) {
 	return base64.RawURLEncoding.EncodeToString(b)[:n], nil
 }
 
+func generateUUID() (string, error) {
+	b := make([]byte, 16)
+
+	_, err := rand.Read(b)
+	if err != nil {
+		return "", err
+	}
+
+	return hex.EncodeToString(b), nil
+}
+
 func (srv URLService) Shorten(originalURL string) (string, error) {
 	unlimited := srv.collisionRetries <= 0
 
@@ -50,25 +63,39 @@ func (srv URLService) Shorten(originalURL string) (string, error) {
 			return "", err
 		}
 
-		now := time.Now()
-		u := model.URL{
-			Original:  originalURL,
-			Code:      code,
-			CreatedAt: now,
-			UpdatedAt: now,
+		_, err = srv.repo.Get(code)
+		if err != nil && !errors.Is(err, repository.ErrNotFound) {
+			return "", err
 		}
 
-		err = srv.repo.Write(u)
-		if err == nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			now := time.Now()
+
+			uuid, err := generateUUID()
+			if err != nil {
+				return "", err
+			}
+
+			u := model.URL{
+				UUID:      uuid,
+				Original:  originalURL,
+				Code:      code,
+				CreatedAt: now,
+				UpdatedAt: now,
+			}
+
+			if err := srv.repo.Write(u); err != nil {
+				if errors.Is(err, repository.ErrConflict) {
+					continue
+				}
+				return "", err
+			}
+
 			return url.JoinPath(srv.baseURL, code)
 		}
-		if errors.Is(err, repository.ErrConflict) {
-			continue
-		}
-		return "", err
 	}
 
-	return "", errors.New("failed to generate unique code after max retries")
+	return "", fmt.Errorf("failed to generate unique code after %d attempts", srv.collisionRetries)
 }
 
 func (srv URLService) Resolve(code string) (string, error) {

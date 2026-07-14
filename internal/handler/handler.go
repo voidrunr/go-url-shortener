@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -8,6 +9,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/rs/zerolog/log"
+	"github.com/voidrunr/go-url-shortener/internal/middleware"
 	"github.com/voidrunr/go-url-shortener/internal/repository"
 )
 
@@ -28,7 +31,10 @@ func New(svc Shortener) *URLHandler {
 
 func (hlr *URLHandler) Router() http.Handler {
 	r := chi.NewRouter()
+	r.Use(middleware.Logging)
+	r.Use(middleware.Gzip)
 	r.Post("/", hlr.handleShorten)
+	r.Post("/api/shorten", hlr.handleAPIShorten)
 	r.Get("/", hlr.handleEmptyCode)
 	r.Get("/{code}", hlr.handleResolve)
 	return r
@@ -55,6 +61,36 @@ func (hlr *URLHandler) handleShorten(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(shortURL))
+}
+
+type shortenRequest struct {
+	URL string `json:"url"`
+}
+
+type shortenResponse struct {
+	Result string `json:"result"`
+}
+
+func (hlr *URLHandler) handleAPIShorten(w http.ResponseWriter, r *http.Request) {
+	var req shortenRequest
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&req); err != nil || req.URL == "" {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	shortURL, err := hlr.svc.Shorten(req.URL)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	resp := shortenResponse{Result: shortURL}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Error().Err(err).Msg("failed to encode response")
+	}
 }
 
 func (hlr *URLHandler) handleResolve(w http.ResponseWriter, r *http.Request) {
