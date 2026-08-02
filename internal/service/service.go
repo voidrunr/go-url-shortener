@@ -18,19 +18,33 @@ type Repository interface {
 	WriteBatch([]model.URL) error
 	Get(string) (model.URL, error)
 	GetByUser(string) ([]model.URL, error)
+	DeleteBatch(userID string, codes []string) error
 }
 
 type URLService struct {
 	repo             Repository
 	baseURL          string
 	collisionRetries int
+	deleter          *deleter
 }
 
+const (
+	defaultFlushInterval = 100 * time.Millisecond
+	defaultQueueSize     = 256
+)
+
 func New(repo Repository, baseURL string, collisionRetries int) *URLService {
+	return NewWithDeleter(repo, baseURL, collisionRetries, defaultFlushInterval, defaultQueueSize)
+}
+
+func NewWithDeleter(repo Repository, baseURL string, collisionRetries int, flushInterval time.Duration, queueSize int) *URLService {
+	dl := newDeleter(repo, flushInterval, queueSize)
+	dl.start()
 	return &URLService{
 		repo:             repo,
 		baseURL:          baseURL,
 		collisionRetries: collisionRetries,
+		deleter:          dl,
 	}
 }
 
@@ -171,7 +185,19 @@ func (srv URLService) Resolve(code string) (string, error) {
 		return "", err
 	}
 
+	if url.Deleted {
+		return "", repository.ErrGone
+	}
+
 	return url.Original, err
+}
+
+func (srv URLService) Delete(userID string, codes []string) error {
+	if len(codes) == 0 {
+		return nil
+	}
+	srv.deleter.enqueue(deleteRequest{userID: userID, codes: codes})
+	return nil
 }
 
 func (srv URLService) ListByUser(userID string) ([]model.URL, error) {

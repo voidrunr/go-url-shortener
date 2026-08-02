@@ -120,6 +120,34 @@ func TestMemoryRepository(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, u2.Original, got2.Original)
 	})
+
+	t.Run("delete batch only affects owned urls", func(t *testing.T) {
+		repo := NewMemory()
+		u1 := testURL("e1", "https://one.delete.example")
+		u1.UserID = "user-a"
+		u2 := testURL("e2", "https://two.delete.example")
+		u2.UserID = "user-a"
+		u3 := testURL("e3", "https://three.delete.example")
+		u3.UserID = "user-b"
+
+		require.NoError(t, repo.Write(u1))
+		require.NoError(t, repo.Write(u2))
+		require.NoError(t, repo.Write(u3))
+
+		require.NoError(t, repo.DeleteBatch("user-a", []string{"e1", "e2", "missing"}))
+
+		got1, err := repo.Get("e1")
+		require.NoError(t, err)
+		assert.True(t, got1.Deleted)
+
+		got2, err := repo.Get("e2")
+		require.NoError(t, err)
+		assert.True(t, got2.Deleted)
+
+		got3, err := repo.Get("e3")
+		require.NoError(t, err)
+		assert.False(t, got3.Deleted)
+	})
 }
 
 func TestMemoryRepository_Empty(t *testing.T) {

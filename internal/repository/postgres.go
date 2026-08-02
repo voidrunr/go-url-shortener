@@ -100,14 +100,14 @@ func (repo *PostgresRepository) WriteBatch(urls []model.URL) error {
 
 func (repo *PostgresRepository) getByOriginal(ctx context.Context, original string) (model.URL, error) {
 	const query = `
-		SELECT code, original_url, user_id, created_at, updated_at
+		SELECT code, original_url, user_id, is_deleted, created_at, updated_at
 		FROM shortener_urls
 		WHERE original_url = $1
 	`
 
 	var url model.URL
 	err := repo.db.QueryRowContext(ctx, query, original).
-		Scan(&url.Code, &url.Original, &url.UserID, &url.CreatedAt, &url.UpdatedAt)
+		Scan(&url.Code, &url.Original, &url.UserID, &url.Deleted, &url.CreatedAt, &url.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.URL{}, ErrNotFound
 	}
@@ -120,14 +120,14 @@ func (repo *PostgresRepository) getByOriginal(ctx context.Context, original stri
 
 func (repo *PostgresRepository) Get(code string) (model.URL, error) {
 	const query = `
-		SELECT code, original_url, user_id, created_at, updated_at
+		SELECT code, original_url, user_id, is_deleted, created_at, updated_at
 		FROM shortener_urls
 		WHERE code = $1
 	`
 
 	var url model.URL
 	err := repo.db.QueryRowContext(context.Background(), query, code).
-		Scan(&url.Code, &url.Original, &url.UserID, &url.CreatedAt, &url.UpdatedAt)
+		Scan(&url.Code, &url.Original, &url.UserID, &url.Deleted, &url.CreatedAt, &url.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.URL{}, ErrNotFound
 	}
@@ -140,7 +140,7 @@ func (repo *PostgresRepository) Get(code string) (model.URL, error) {
 
 func (repo *PostgresRepository) GetByUser(userID string) ([]model.URL, error) {
 	const query = `
-		SELECT code, original_url, user_id, created_at, updated_at
+		SELECT code, original_url, user_id, is_deleted, created_at, updated_at
 		FROM shortener_urls
 		WHERE user_id = $1
 		ORDER BY created_at, id
@@ -157,7 +157,7 @@ func (repo *PostgresRepository) GetByUser(userID string) ([]model.URL, error) {
 	urls := make([]model.URL, 0)
 	for rows.Next() {
 		var url model.URL
-		if err := rows.Scan(&url.Code, &url.Original, &url.UserID, &url.CreatedAt, &url.UpdatedAt); err != nil {
+		if err := rows.Scan(&url.Code, &url.Original, &url.UserID, &url.Deleted, &url.CreatedAt, &url.UpdatedAt); err != nil {
 			return nil, err
 		}
 		urls = append(urls, url)
@@ -168,4 +168,19 @@ func (repo *PostgresRepository) GetByUser(userID string) ([]model.URL, error) {
 	}
 
 	return urls, nil
+}
+
+func (repo *PostgresRepository) DeleteBatch(userID string, codes []string) error {
+	if len(codes) == 0 {
+		return nil
+	}
+
+	const query = `
+		UPDATE shortener_urls
+		SET is_deleted = TRUE, updated_at = NOW()
+		WHERE user_id = $1 AND code = ANY($2)
+	`
+
+	_, err := repo.db.ExecContext(context.Background(), query, userID, codes)
+	return err
 }

@@ -622,3 +622,94 @@ func TestHandleUserURLs_SetsCookieOnFirstVisit(t *testing.T) {
 	assert.Len(t, res.Cookies(), 1)
 	assert.Equal(t, auth.CookieName, res.Cookies()[0].Name)
 }
+
+// --- DELETE /api/user/urls ---
+
+func TestHandleDeleteUserURLs(t *testing.T) {
+	tests := []struct {
+		name       string
+		sendCookie bool
+		cookieUser string
+		body       string
+		setup      func(*mocks.Shortener)
+		wantCode   int
+	}{
+		{
+			name:       "valid request returns 202",
+			sendCookie: true,
+			cookieUser: "user-1",
+			body:       `["6qxTVvsy","RTfd56hn"]`,
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().Delete("user-1", []string{"6qxTVvsy", "RTfd56hn"}).Return(nil)
+			},
+			wantCode: http.StatusAccepted,
+		},
+		{
+			name:       "empty list returns 202",
+			sendCookie: true,
+			cookieUser: "user-1",
+			body:       `[]`,
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().Delete("user-1", []string{}).Return(nil)
+			},
+			wantCode: http.StatusAccepted,
+		},
+		{
+			name:       "cookie without user id returns 401",
+			sendCookie: true,
+			body:       `["6qxTVvsy"]`,
+			wantCode:   http.StatusUnauthorized,
+		},
+		{
+			name:       "invalid JSON returns 400",
+			sendCookie: true,
+			cookieUser: "user-1",
+			body:       `not json`,
+			wantCode:   http.StatusBadRequest,
+		},
+		{
+			name:       "service error returns 500",
+			sendCookie: true,
+			cookieUser: "user-1",
+			body:       `["6qxTVvsy"]`,
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().Delete("user-1", []string{"6qxTVvsy"}).Return(io.ErrUnexpectedEOF)
+			},
+			wantCode: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := mocks.NewShortener(t)
+			if tt.setup != nil {
+				tt.setup(svc)
+			}
+
+			req := httptest.NewRequest(http.MethodDelete, "/api/user/urls", strings.NewReader(tt.body))
+			if tt.sendCookie {
+				c := auth.New("test-secret").Cookie(tt.cookieUser)
+				req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: c.Value})
+			}
+			w := httptest.NewRecorder()
+
+			newHandlerWithAuth(svc, auth.New("test-secret")).ServeHTTP(w, req)
+
+			assert.Equal(t, tt.wantCode, w.Code)
+		})
+	}
+}
+
+// --- GET /{id} deleted URL ---
+
+func TestHandleResolve_DeletedURLReturnsGone(t *testing.T) {
+	svc := mocks.NewShortener(t)
+	svc.EXPECT().Resolve("deleted1").Return("", repository.ErrGone)
+
+	req := httptest.NewRequest(http.MethodGet, "/deleted1", nil)
+	w := httptest.NewRecorder()
+
+	newHandler(svc).ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusGone, w.Code)
+}

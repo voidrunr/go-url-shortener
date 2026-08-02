@@ -76,6 +76,28 @@ func (repo *MemoryRepository) GetByUser(userID string) ([]model.URL, error) {
 	return urls, nil
 }
 
+func (repo *MemoryRepository) DeleteBatch(userID string, codes []string) error {
+	repo.mutex.Lock()
+	defer repo.mutex.Unlock()
+
+	wanted := make(map[string]struct{}, len(codes))
+	for _, code := range codes {
+		wanted[code] = struct{}{}
+	}
+
+	for code, url := range repo.store {
+		if url.UserID != userID {
+			continue
+		}
+		if _, ok := wanted[code]; ok {
+			url.Deleted = true
+			repo.store[code] = url
+		}
+	}
+
+	return nil
+}
+
 func (repo *MemoryRepository) findByOriginal(original string) (model.URL, bool) {
 	for _, url := range repo.store {
 		if url.Original == original {

@@ -10,6 +10,7 @@ var (
 	ErrNotFound         = errors.New("url not found")
 	ErrConflict         = errors.New("code already exists")
 	ErrURLAlreadyExists = errors.New("url already exists")
+	ErrGone             = errors.New("url is deleted")
 )
 
 type DuplicateURLError struct {
@@ -29,4 +30,5 @@ type Repository interface {
 	WriteBatch([]model.URL) error
 	Get(string) (model.URL, error)
 	GetByUser(string) ([]model.URL, error)
+	DeleteBatch(userID string, codes []string) error
 }

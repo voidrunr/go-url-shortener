@@ -24,6 +24,7 @@ type Shortener interface {
 	ShortenBatch([]model.BatchItem, string) ([]model.BatchItem, error)
 	Resolve(string) (string, error)
 	ListByUser(string) ([]model.URL, error)
+	Delete(string, []string) error
 }
 
 type Pinger interface {
@@ -78,6 +79,7 @@ func (hlr *URLHandler) Router() http.Handler {
 	r.Post("/api/shorten", hlr.handleAPIShorten)
 	r.Post("/api/shorten/batch", hlr.handleAPIShortenBatch)
 	r.Get("/api/user/urls", hlr.handleUserURLs)
+	r.Delete("/api/user/urls", hlr.handleDeleteUserURLs)
 	r.Get("/", hlr.handleEmptyCode)
 	r.Get("/ping", hlr.handlePing)
 	r.Get("/{code}", hlr.handleResolve)
@@ -237,11 +239,37 @@ func (hlr *URLHandler) handleResolve(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, http.StatusText(http.StatusNotFound), http.StatusNotFound)
 			return
 		}
+		if errors.Is(err, repository.ErrGone) {
+			http.Error(w, http.StatusText(http.StatusGone), http.StatusGone)
+			return
+		}
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
 	http.Redirect(w, r, originalURL, http.StatusTemporaryRedirect)
+}
+
+func (hlr *URLHandler) handleDeleteUserURLs(w http.ResponseWriter, r *http.Request) {
+	if auth.HasNoUserID(r.Context()) {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	var codes []string
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&codes); err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
+
+	userID := auth.UserIDFromContext(r.Context())
+	if err := hlr.svc.Delete(userID, codes); err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusAccepted)
 }
 
 type userURLResponse struct {
