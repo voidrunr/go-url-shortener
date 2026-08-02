@@ -28,6 +28,17 @@ func TestMemoryRepository(t *testing.T) {
 		assert.ErrorIs(t, err, ErrConflict)
 	})
 
+	t.Run("duplicate original returns DuplicateURLError", func(t *testing.T) {
+		repo := NewMemory()
+		require.NoError(t, repo.Write(testURL("abc123", "https://example.com")))
+
+		err := repo.Write(testURL("xyz789", "https://example.com"))
+		var dupErr *DuplicateURLError
+		require.ErrorAs(t, err, &dupErr)
+		assert.ErrorIs(t, err, ErrURLAlreadyExists)
+		assert.Equal(t, "abc123", dupErr.URL.Code)
+	})
+
 	t.Run("batch write", func(t *testing.T) {
 		repo := NewMemory()
 		u1 := testURL("b1", "https://one.example")

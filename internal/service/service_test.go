@@ -22,6 +22,11 @@ func newStubRepo() *stubRepo {
 }
 
 func (r *stubRepo) Write(url model.URL) error {
+	for _, existing := range r.urls {
+		if existing.Original == url.Original {
+			return &repository.DuplicateURLError{URL: existing}
+		}
+	}
 	if _, ok := r.urls[url.Code]; ok {
 		return repository.ErrConflict
 	}
@@ -94,4 +99,20 @@ func TestShortenBatch_RetriesOnConflict(t *testing.T) {
 	got, err := repo.Get(code)
 	require.NoError(t, err)
 	assert.Equal(t, "https://new.example", got.Original)
+}
+
+func TestShorten_ExistingURLReturnsExistingShortURL(t *testing.T) {
+	repo := newStubRepo()
+	svc := New(repo, "http://localhost:8080", 5)
+
+	first, err := svc.Shorten("https://duplicate.example")
+	require.NoError(t, err)
+
+	second, err := svc.Shorten("https://duplicate.example")
+	require.ErrorIs(t, err, repository.ErrURLAlreadyExists)
+	assert.Equal(t, first, second)
+
+	got, err := repo.Get(strings.TrimPrefix(second, "http://localhost:8080/"))
+	require.NoError(t, err)
+	assert.Equal(t, "https://duplicate.example", got.Original)
 }

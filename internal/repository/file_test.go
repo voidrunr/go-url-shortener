@@ -46,6 +46,19 @@ func TestFileRepository_Conflict(t *testing.T) {
 	assert.ErrorIs(t, err, ErrConflict)
 }
 
+func TestFileRepository_DuplicateOriginal(t *testing.T) {
+	repo, err := NewFile(filepath.Join(t.TempDir(), "data.json"))
+	require.NoError(t, err)
+
+	require.NoError(t, repo.Write(testURL("abc123", "https://example.com")))
+
+	err = repo.Write(testURL("xyz789", "https://example.com"))
+	var dupErr *DuplicateURLError
+	require.ErrorAs(t, err, &dupErr)
+	assert.ErrorIs(t, err, ErrURLAlreadyExists)
+	assert.Equal(t, "abc123", dupErr.URL.Code)
+}
+
 func TestFileRepository_MissingFileIsNotError(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nope", "data.json")
 

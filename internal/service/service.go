@@ -86,6 +86,14 @@ func (srv URLService) Shorten(originalURL string) (string, error) {
 			}
 
 			if err := srv.repo.Write(u); err != nil {
+				var dupErr *repository.DuplicateURLError
+				if errors.As(err, &dupErr) {
+					shortURL, joinErr := url.JoinPath(srv.baseURL, dupErr.URL.Code)
+					if joinErr != nil {
+						return "", joinErr
+					}
+					return shortURL, repository.ErrURLAlreadyExists
+				}
 				if errors.Is(err, repository.ErrConflict) {
 					continue
 				}

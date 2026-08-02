@@ -21,6 +21,10 @@ func (repo *MemoryRepository) Write(url model.URL) error {
 	repo.mutex.Lock()
 	defer repo.mutex.Unlock()
 
+	if existing, ok := repo.findByOriginal(url.Original); ok {
+		return &DuplicateURLError{URL: existing}
+	}
+
 	if _, ok := repo.store[url.Code]; ok {
 		return ErrConflict
 	}
@@ -56,4 +60,14 @@ func (repo *MemoryRepository) Get(code string) (model.URL, error) {
 	}
 
 	return url, nil
+}
+
+func (repo *MemoryRepository) findByOriginal(original string) (model.URL, bool) {
+	for _, url := range repo.store {
+		if url.Original == original {
+			return url, true
+		}
+	}
+
+	return model.URL{}, false
 }

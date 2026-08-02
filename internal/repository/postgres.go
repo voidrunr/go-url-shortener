@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
+	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/voidrunr/go-url-shortener/internal/model"
@@ -19,7 +20,40 @@ func NewPostgres(db *sql.DB) *PostgresRepository {
 }
 
 func (repo *PostgresRepository) Write(url model.URL) error {
-	return repo.WriteBatch([]model.URL{url})
+	const query = `
+		INSERT INTO shortener_urls (code, original_url, created_at, updated_at)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (original_url) DO NOTHING
+		RETURNING code
+	`
+
+	ctx := context.Background()
+
+	var insertedCode string
+	err := repo.db.QueryRowContext(
+		ctx,
+		query,
+		url.Code,
+		url.Original,
+		url.CreatedAt,
+		url.UpdatedAt,
+	).Scan(&insertedCode)
+	if errors.Is(err, sql.ErrNoRows) {
+		existing, findErr := repo.getByOriginal(ctx, url.Original)
+		if findErr != nil {
+			return findErr
+		}
+		return &DuplicateURLError{URL: existing}
+	}
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
+			return ErrConflict
+		}
+		return err
+	}
+
+	return nil
 }
 
 func (repo *PostgresRepository) WriteBatch(urls []model.URL) error {
@@ -52,7 +86,7 @@ func (repo *PostgresRepository) WriteBatch(urls []model.URL) error {
 		)
 		if err != nil {
 			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
 				return ErrConflict
 			}
 			return err
@@ -60,6 +94,26 @@ func (repo *PostgresRepository) WriteBatch(urls []model.URL) error {
 	}
 
 	return tx.Commit()
+}
+
+func (repo *PostgresRepository) getByOriginal(ctx context.Context, original string) (model.URL, error) {
+	const query = `
+		SELECT code, original_url, created_at, updated_at
+		FROM shortener_urls
+		WHERE original_url = $1
+	`
+
+	var url model.URL
+	err := repo.db.QueryRowContext(ctx, query, original).
+		Scan(&url.Code, &url.Original, &url.CreatedAt, &url.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.URL{}, ErrNotFound
+	}
+	if err != nil {
+		return model.URL{}, err
+	}
+
+	return url, nil
 }
 
 func (repo *PostgresRepository) Get(code string) (model.URL, error) {

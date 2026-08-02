@@ -7,9 +7,22 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("url not found")
-	ErrConflict = errors.New("code already exists")
+	ErrNotFound         = errors.New("url not found")
+	ErrConflict         = errors.New("code already exists")
+	ErrURLAlreadyExists = errors.New("url already exists")
 )
+
+type DuplicateURLError struct {
+	URL model.URL
+}
+
+func (e *DuplicateURLError) Error() string {
+	return ErrURLAlreadyExists.Error()
+}
+
+func (e *DuplicateURLError) Is(target error) bool {
+	return target == ErrURLAlreadyExists
+}
 
 type Repository interface {
 	Write(model.URL) error

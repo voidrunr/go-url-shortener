@@ -95,6 +95,12 @@ func (hlr *URLHandler) handleShorten(w http.ResponseWriter, r *http.Request) {
 	originalURL := strings.TrimSpace(string(body))
 	shortURL, err := hlr.svc.Shorten(originalURL)
 	if err != nil {
+		if errors.Is(err, repository.ErrURLAlreadyExists) {
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusConflict)
+			w.Write([]byte(shortURL))
+			return
+		}
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
@@ -132,6 +138,15 @@ func (hlr *URLHandler) handleAPIShorten(w http.ResponseWriter, r *http.Request) 
 
 	shortURL, err := hlr.svc.Shorten(req.URL)
 	if err != nil {
+		if errors.Is(err, repository.ErrURLAlreadyExists) {
+			resp := shortenResponse{Result: shortURL}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			if err := json.NewEncoder(w).Encode(resp); err != nil {
+				log.Error().Err(err).Msg("failed to encode response")
+			}
+			return
+		}
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}

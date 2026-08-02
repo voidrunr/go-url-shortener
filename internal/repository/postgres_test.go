@@ -1,8 +1,10 @@
 package repository
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +16,25 @@ import (
 	"github.com/voidrunr/go-url-shortener/internal/model"
 )
 
+func deleteByOriginals(t *testing.T, db *sql.DB, originals ...string) {
+	t.Helper()
+
+	if len(originals) == 0 {
+		return
+	}
+
+	placeholders := make([]string, 0, len(originals))
+	args := make([]any, 0, len(originals))
+	for i, original := range originals {
+		placeholders = append(placeholders, fmt.Sprintf("$%d", i+1))
+		args = append(args, original)
+	}
+
+	query := fmt.Sprintf("DELETE FROM shortener_urls WHERE original_url IN (%s)", strings.Join(placeholders, ", "))
+	_, err := db.Exec(query, args...)
+	require.NoError(t, err)
+}
+
 func TestPostgresRepository(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_DSN")
 	if dsn == "" {
@@ -22,11 +43,14 @@ func TestPostgresRepository(t *testing.T) {
 
 	db, err := database.Open(dsn)
 	require.NoError(t, err)
-	defer db.Close()
+
+	t.Cleanup(func() { _ = db.Close() })
 
 	require.NoError(t, migrations.Up(db))
 
 	repo := NewPostgres(db)
+
+	deleteByOriginals(t, db, "https://example.com", "https://other.com")
 
 	code := fmt.Sprintf("pg%d", time.Now().UnixNano())
 	url := testURL(code, "https://example.com")
@@ -49,6 +73,20 @@ func TestPostgresRepository(t *testing.T) {
 		assert.ErrorIs(t, err, ErrConflict)
 	})
 
+	t.Run("duplicate original returns DuplicateURLError", func(t *testing.T) {
+		code2 := fmt.Sprintf("pgd%d", time.Now().UnixNano())
+		t.Cleanup(func() {
+			_, _ = db.Exec("DELETE FROM shortener_urls WHERE code = $1", code2)
+		})
+
+		err := repo.Write(testURL(code2, url.Original))
+		var dupErr *DuplicateURLError
+		require.ErrorAs(t, err, &dupErr)
+		assert.ErrorIs(t, err, ErrURLAlreadyExists)
+		assert.Equal(t, code, dupErr.URL.Code)
+		assert.Equal(t, url.Original, dupErr.URL.Original)
+	})
+
 	t.Run("unknown code returns ErrNotFound", func(t *testing.T) {
 		_, err := repo.Get("missing")
 		assert.ErrorIs(t, err, ErrNotFound)
@@ -63,11 +101,19 @@ func TestPostgresRepository_WriteBatch(t *testing.T) {
 
 	db, err := database.Open(dsn)
 	require.NoError(t, err)
-	defer db.Close()
+
+	t.Cleanup(func() { _ = db.Close() })
 
 	require.NoError(t, migrations.Up(db))
 
 	repo := NewPostgres(db)
+
+	deleteByOriginals(t, db,
+		"https://one.example",
+		"https://two.example",
+		"https://three.example",
+		"https://conflict.example",
+	)
 
 	code1 := fmt.Sprintf("pgb%d", time.Now().UnixNano())
 	code2 := fmt.Sprintf("pgb%d", time.Now().UnixNano()+1)

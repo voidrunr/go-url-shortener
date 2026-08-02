@@ -71,6 +71,18 @@ func TestHandleShorten(t *testing.T) {
 			},
 			want: want{code: http.StatusInternalServerError},
 		},
+		{
+			name: "duplicate URL returns 409 with existing short URL",
+			body: "https://practicum.yandex.ru/",
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().Shorten("https://practicum.yandex.ru/").Return("http://localhost:8080/EwHXdJfB", repository.ErrURLAlreadyExists)
+			},
+			want: want{
+				code:        http.StatusConflict,
+				body:        "http://localhost:8080/EwHXdJfB",
+				contentType: "text/plain",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -158,6 +170,18 @@ func TestHandleAPIShorten(t *testing.T) {
 				m.EXPECT().Shorten("https://example.com").Return("", io.ErrUnexpectedEOF)
 			},
 			want: want{code: http.StatusInternalServerError},
+		},
+		{
+			name: "duplicate URL returns 409 with existing short URL",
+			body: `{"url":"https://practicum.yandex.ru/"}`,
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().Shorten("https://practicum.yandex.ru/").Return("http://localhost:8080/EwHXdJfB", repository.ErrURLAlreadyExists)
+			},
+			want: want{
+				code:        http.StatusConflict,
+				result:      "http://localhost:8080/EwHXdJfB",
+				contentType: "application/json",
+			},
 		},
 	}
 
