@@ -10,10 +10,10 @@ build:
 	go build -o $(BUILD_DIR)/$(APP_NAME) $(APP_MAIN)
 
 run:
-	go run $(APP_MAIN)
+	@test -f .env && set -a && . ./.env && set +a; go run $(APP_MAIN)
 
 test:
-	go test -v ./...
+	@test -f .env && set -a && . ./.env && set +a; go test -v ./...
 
 lint:
 	go vet ./...

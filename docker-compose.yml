@@ -16,5 +16,15 @@ services:
       timeout: 3s
       retries: 10
 
+  dbgate:
+    image: dbgate/dbgate
+    container_name: go-url-shortener-dbgate
+    depends_on:
+      - postgres
+    environment:
+      CONN_connections: '[{"name":"local-postgres","engine":"postgresql","host":"postgres","port":5432,"user":"shortener","password":"shortener","database":"shortener"}]'
+    ports:
+      - "3000:3000"
+
 volumes:
   postgres_data:
