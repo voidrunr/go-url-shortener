@@ -1,0 +1,97 @@
+package service
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	"github.com/voidrunr/go-url-shortener/internal/model"
+	"github.com/voidrunr/go-url-shortener/internal/repository"
+)
+
+type stubRepo struct {
+	urls       map[string]model.URL
+	writeCalls int
+	conflicts  int
+}
+
+func newStubRepo() *stubRepo {
+	return &stubRepo{urls: make(map[string]model.URL)}
+}
+
+func (r *stubRepo) Write(url model.URL) error {
+	if _, ok := r.urls[url.Code]; ok {
+		return repository.ErrConflict
+	}
+	r.urls[url.Code] = url
+	return nil
+}
+
+func (r *stubRepo) WriteBatch(urls []model.URL) error {
+	r.writeCalls++
+	if r.conflicts > 0 {
+		r.conflicts--
+		return repository.ErrConflict
+	}
+	for _, u := range urls {
+		if err := r.Write(u); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (r *stubRepo) Get(code string) (model.URL, error) {
+	u, ok := r.urls[code]
+	if !ok {
+		return model.URL{}, repository.ErrNotFound
+	}
+	return u, nil
+}
+
+func TestShortenBatch(t *testing.T) {
+	repo := newStubRepo()
+	svc := New(repo, "http://localhost:8080", 5)
+
+	items := []model.BatchItem{
+		{CorrelationID: "1", OriginalURL: "https://one.example"},
+		{CorrelationID: "2", OriginalURL: "https://two.example"},
+	}
+
+	results, err := svc.ShortenBatch(items)
+	require.NoError(t, err)
+	require.Len(t, results, 2)
+
+	for i, res := range results {
+		assert.Equal(t, items[i].CorrelationID, res.CorrelationID)
+		assert.True(t, strings.HasPrefix(res.ShortURL, "http://localhost:8080/"), res.ShortURL)
+
+		code := strings.TrimPrefix(res.ShortURL, "http://localhost:8080/")
+		got, err := repo.Get(code)
+		require.NoError(t, err)
+		assert.Equal(t, items[i].OriginalURL, got.Original)
+	}
+}
+
+func TestShortenBatch_RetriesOnConflict(t *testing.T) {
+	repo := newStubRepo()
+	repo.conflicts = 2
+	svc := New(repo, "http://localhost:8080", 5)
+
+	items := []model.BatchItem{
+		{CorrelationID: "1", OriginalURL: "https://new.example"},
+	}
+
+	results, err := svc.ShortenBatch(items)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, "1", results[0].CorrelationID)
+	assert.Equal(t, 3, repo.writeCalls)
+
+	code := strings.TrimPrefix(results[0].ShortURL, "http://localhost:8080/")
+	got, err := repo.Get(code)
+	require.NoError(t, err)
+	assert.Equal(t, "https://new.example", got.Original)
+}

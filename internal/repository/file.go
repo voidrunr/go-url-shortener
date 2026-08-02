@@ -38,6 +38,22 @@ func (repo *FileRepository) Write(url model.URL) error {
 	return repo.saveToFile()
 }
 
+func (repo *FileRepository) WriteBatch(urls []model.URL) error {
+	repo.mutex.Lock()
+	defer repo.mutex.Unlock()
+
+	for _, url := range urls {
+		if _, ok := repo.store[url.Code]; ok {
+			return ErrConflict
+		}
+	}
+
+	for _, url := range urls {
+		repo.store[url.Code] = url
+	}
+	return repo.saveToFile()
+}
+
 func (repo *FileRepository) Delete(url model.URL) error {
 	repo.mutex.Lock()
 	defer repo.mutex.Unlock()

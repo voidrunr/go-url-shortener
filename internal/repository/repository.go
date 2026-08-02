@@ -13,5 +13,6 @@ var (
 
 type Repository interface {
 	Write(model.URL) error
+	WriteBatch([]model.URL) error
 	Get(string) (model.URL, error)
 }

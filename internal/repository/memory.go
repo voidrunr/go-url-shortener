@@ -29,6 +29,22 @@ func (repo *MemoryRepository) Write(url model.URL) error {
 	return nil
 }
 
+func (repo *MemoryRepository) WriteBatch(urls []model.URL) error {
+	repo.mutex.Lock()
+	defer repo.mutex.Unlock()
+
+	for _, url := range urls {
+		if _, ok := repo.store[url.Code]; ok {
+			return ErrConflict
+		}
+	}
+
+	for _, url := range urls {
+		repo.store[url.Code] = url
+	}
+	return nil
+}
+
 func (repo *MemoryRepository) Get(code string) (model.URL, error) {
 	repo.mutex.RLock()
 	defer repo.mutex.RUnlock()

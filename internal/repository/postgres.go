@@ -19,28 +19,47 @@ func NewPostgres(db *sql.DB) *PostgresRepository {
 }
 
 func (repo *PostgresRepository) Write(url model.URL) error {
+	return repo.WriteBatch([]model.URL{url})
+}
+
+func (repo *PostgresRepository) WriteBatch(urls []model.URL) error {
 	const query = `
 		INSERT INTO shortener_urls (code, original_url, created_at, updated_at)
 		VALUES ($1, $2, $3, $4)
 	`
 
-	_, err := repo.db.ExecContext(
-		context.Background(),
-		query,
-		url.Code,
-		url.Original,
-		url.CreatedAt,
-		url.UpdatedAt,
-	)
+	ctx := context.Background()
+
+	tx, err := repo.db.BeginTx(ctx, nil)
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
-			return ErrConflict
-		}
 		return err
 	}
+	defer tx.Rollback()
 
-	return nil
+	stmt, err := tx.PrepareContext(ctx, query)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, url := range urls {
+		_, err := stmt.ExecContext(
+			ctx,
+			url.Code,
+			url.Original,
+			url.CreatedAt,
+			url.UpdatedAt,
+		)
+		if err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+				return ErrConflict
+			}
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 func (repo *PostgresRepository) Get(code string) (model.URL, error) {

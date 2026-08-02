@@ -6,6 +6,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/voidrunr/go-url-shortener/internal/model"
 )
 
 func TestFileRepository_Persistence(t *testing.T) {
@@ -49,4 +51,42 @@ func TestFileRepository_MissingFileIsNotError(t *testing.T) {
 
 	_, err := NewFile(path)
 	assert.NoError(t, err)
+}
+
+func TestFileRepository_WriteBatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "data.json")
+
+	repo, err := NewFile(path)
+	require.NoError(t, err)
+
+	u1 := testURL("b1", "https://one.example")
+	u2 := testURL("b2", "https://two.example")
+	require.NoError(t, repo.WriteBatch([]model.URL{u1, u2}))
+
+	reopened, err := NewFile(path)
+	require.NoError(t, err)
+
+	got1, err := reopened.Get("b1")
+	require.NoError(t, err)
+	assert.Equal(t, u1.Original, got1.Original)
+
+	got2, err := reopened.Get("b2")
+	require.NoError(t, err)
+	assert.Equal(t, u2.Original, got2.Original)
+}
+
+func TestFileRepository_WriteBatchConflict(t *testing.T) {
+	repo, err := NewFile(filepath.Join(t.TempDir(), "data.json"))
+	require.NoError(t, err)
+
+	require.NoError(t, repo.Write(testURL("b1", "https://one.example")))
+
+	err = repo.WriteBatch([]model.URL{
+		testURL("b2", "https://two.example"),
+		testURL("b1", "https://conflict.example"),
+	})
+	assert.ErrorIs(t, err, ErrConflict)
+
+	_, err = repo.Get("b2")
+	assert.ErrorIs(t, err, ErrNotFound)
 }

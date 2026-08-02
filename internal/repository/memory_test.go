@@ -5,6 +5,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/voidrunr/go-url-shortener/internal/model"
 )
 
 func TestMemoryRepository(t *testing.T) {
@@ -24,6 +26,36 @@ func TestMemoryRepository(t *testing.T) {
 	t.Run("duplicate code returns ErrConflict", func(t *testing.T) {
 		err := repo.Write(testURL("abc123", "https://other.com"))
 		assert.ErrorIs(t, err, ErrConflict)
+	})
+
+	t.Run("batch write", func(t *testing.T) {
+		repo := NewMemory()
+		u1 := testURL("b1", "https://one.example")
+		u2 := testURL("b2", "https://two.example")
+
+		require.NoError(t, repo.WriteBatch([]model.URL{u1, u2}))
+
+		got1, err := repo.Get("b1")
+		require.NoError(t, err)
+		assert.Equal(t, u1.Original, got1.Original)
+
+		got2, err := repo.Get("b2")
+		require.NoError(t, err)
+		assert.Equal(t, u2.Original, got2.Original)
+	})
+
+	t.Run("batch write conflict writes nothing", func(t *testing.T) {
+		repo := NewMemory()
+		require.NoError(t, repo.Write(testURL("b1", "https://one.example")))
+
+		err := repo.WriteBatch([]model.URL{
+			testURL("b2", "https://two.example"),
+			testURL("b1", "https://conflict.example"),
+		})
+		assert.ErrorIs(t, err, ErrConflict)
+
+		_, err = repo.Get("b2")
+		assert.ErrorIs(t, err, ErrNotFound)
 	})
 
 	t.Run("unknown code returns ErrNotFound", func(t *testing.T) {
