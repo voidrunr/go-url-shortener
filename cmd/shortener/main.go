@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/voidrunr/go-url-shortener/internal/config"
+	"github.com/voidrunr/go-url-shortener/internal/database"
 	"github.com/voidrunr/go-url-shortener/internal/handler"
 	"github.com/voidrunr/go-url-shortener/internal/repository"
 	"github.com/voidrunr/go-url-shortener/internal/service"
@@ -17,7 +18,17 @@ func main() {
 		log.Fatalf("Failed to create repository: %v", err)
 	}
 	svc := service.New(repo, cfg.BaseURL, cfg.CollisionRetries)
-	hlr := handler.New(svc)
+
+	opts := []handler.Option{}
+	if cfg.DatabaseDSN != "" {
+		db, err := database.Open(cfg.DatabaseDSN)
+		if err != nil {
+			log.Fatalf("Failed to open database: %v", err)
+		}
+		defer db.Close()
+		opts = append(opts, handler.WithPinger(db))
+	}
+	hlr := handler.New(svc, opts...)
 
 	log.Printf("Serving on %s", cfg.ServerAddress)
 

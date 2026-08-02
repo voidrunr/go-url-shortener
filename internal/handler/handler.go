@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -19,14 +21,31 @@ type Shortener interface {
 	Resolve(string) (string, error)
 }
 
-type URLHandler struct {
-	svc Shortener
+type Pinger interface {
+	PingContext(context.Context) error
 }
 
-func New(svc Shortener) *URLHandler {
-	return &URLHandler{
+type Option func(*URLHandler)
+
+func WithPinger(p Pinger) Option {
+	return func(hlr *URLHandler) {
+		hlr.pinger = p
+	}
+}
+
+type URLHandler struct {
+	svc    Shortener
+	pinger Pinger
+}
+
+func New(svc Shortener, opts ...Option) *URLHandler {
+	hlr := &URLHandler{
 		svc: svc,
 	}
+	for _, opt := range opts {
+		opt(hlr)
+	}
+	return hlr
 }
 
 func (hlr *URLHandler) Router() http.Handler {
@@ -36,8 +55,27 @@ func (hlr *URLHandler) Router() http.Handler {
 	r.Post("/", hlr.handleShorten)
 	r.Post("/api/shorten", hlr.handleAPIShorten)
 	r.Get("/", hlr.handleEmptyCode)
+	r.Get("/ping", hlr.handlePing)
 	r.Get("/{code}", hlr.handleResolve)
 	return r
+}
+
+func (hlr *URLHandler) handlePing(w http.ResponseWriter, r *http.Request) {
+	if hlr.pinger == nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+	defer cancel()
+
+	if err := hlr.pinger.PingContext(ctx); err != nil {
+		log.Error().Err(err).Msg("database ping failed")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 func (hlr *URLHandler) handleEmptyCode(w http.ResponseWriter, r *http.Request) {

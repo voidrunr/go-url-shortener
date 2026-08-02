@@ -1,7 +1,9 @@
 package handler_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +20,10 @@ import (
 
 func newHandler(svc handler.Shortener) http.Handler {
 	return handler.New(svc).Router()
+}
+
+func newHandlerWithPinger(svc handler.Shortener, p handler.Pinger) http.Handler {
+	return handler.New(svc, handler.WithPinger(p)).Router()
 }
 
 // --- POST / ---
@@ -289,6 +295,51 @@ func TestHandleResolve(t *testing.T) {
 			if tt.want.location != "" {
 				assert.Equal(t, tt.want.location, res.Header.Get("Location"))
 			}
+		})
+	}
+}
+
+// --- GET /ping ---
+
+type pingerStub struct {
+	err error
+}
+
+func (p pingerStub) PingContext(context.Context) error {
+	return p.err
+}
+
+func TestHandlePing(t *testing.T) {
+	tests := []struct {
+		name   string
+		pinger handler.Pinger
+		want   int
+	}{
+		{
+			name:   "database reachable returns 200",
+			pinger: pingerStub{},
+			want:   http.StatusOK,
+		},
+		{
+			name:   "database unreachable returns 500",
+			pinger: pingerStub{err: errors.New("connection refused")},
+			want:   http.StatusInternalServerError,
+		},
+		{
+			name:   "no database configured returns 500",
+			pinger: nil,
+			want:   http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+			w := httptest.NewRecorder()
+
+			newHandlerWithPinger(mocks.NewShortener(t), tt.pinger).ServeHTTP(w, req)
+
+			assert.Equal(t, tt.want, w.Code)
 		})
 	}
 }
