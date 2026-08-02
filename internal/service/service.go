@@ -17,6 +17,7 @@ type Repository interface {
 	Write(model.URL) error
 	WriteBatch([]model.URL) error
 	Get(string) (model.URL, error)
+	GetByUser(string) ([]model.URL, error)
 }
 
 type URLService struct {
@@ -55,7 +56,7 @@ func generateUUID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func (srv URLService) Shorten(originalURL string) (string, error) {
+func (srv URLService) Shorten(originalURL string, userID string) (string, error) {
 	unlimited := srv.collisionRetries <= 0
 
 	for i := 0; unlimited || i < srv.collisionRetries; i++ {
@@ -81,6 +82,7 @@ func (srv URLService) Shorten(originalURL string) (string, error) {
 				UUID:      uuid,
 				Original:  originalURL,
 				Code:      code,
+				UserID:    userID,
 				CreatedAt: now,
 				UpdatedAt: now,
 			}
@@ -107,7 +109,7 @@ func (srv URLService) Shorten(originalURL string) (string, error) {
 	return "", fmt.Errorf("failed to generate unique code after %d attempts", srv.collisionRetries)
 }
 
-func (srv URLService) ShortenBatch(items []model.BatchItem) ([]model.BatchItem, error) {
+func (srv URLService) ShortenBatch(items []model.BatchItem, userID string) ([]model.BatchItem, error) {
 	unlimited := srv.collisionRetries <= 0
 
 	for i := 0; unlimited || i < srv.collisionRetries; i++ {
@@ -131,6 +133,7 @@ func (srv URLService) ShortenBatch(items []model.BatchItem) ([]model.BatchItem, 
 				UUID:      uuid,
 				Original:  item.OriginalURL,
 				Code:      code,
+				UserID:    userID,
 				CreatedAt: now,
 				UpdatedAt: now,
 			})
@@ -169,4 +172,8 @@ func (srv URLService) Resolve(code string) (string, error) {
 	}
 
 	return url.Original, err
+}
+
+func (srv URLService) ListByUser(userID string) ([]model.URL, error) {
+	return srv.repo.GetByUser(userID)
 }

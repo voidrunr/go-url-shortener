@@ -153,3 +153,56 @@ func TestPostgresRepository_WriteBatch(t *testing.T) {
 		assert.ErrorIs(t, err, ErrNotFound)
 	})
 }
+
+func TestPostgresRepository_GetByUser(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_DSN")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_DSN not set, skipping postgres integration test")
+	}
+
+	db, err := database.Open(dsn)
+	require.NoError(t, err)
+
+	t.Cleanup(func() { _ = db.Close() })
+
+	require.NoError(t, migrations.Up(db))
+
+	repo := NewPostgres(db)
+
+	base := time.Now().UnixNano()
+	codes := []string{
+		fmt.Sprintf("pgu%d", base),
+		fmt.Sprintf("pgu%d", base+1),
+		fmt.Sprintf("pgu%d", base+2),
+	}
+	t.Cleanup(func() {
+		_, _ = db.Exec("DELETE FROM shortener_urls WHERE code = ANY($1)", codes)
+	})
+
+	u1 := testURL(codes[0], "https://one.user.example")
+	u1.UserID = "user-a"
+	u2 := testURL(codes[1], "https://two.user.example")
+	u2.UserID = "user-a"
+	u3 := testURL(codes[2], "https://three.user.example")
+	u3.UserID = "user-b"
+
+	require.NoError(t, repo.Write(u1))
+	require.NoError(t, repo.Write(u2))
+	require.NoError(t, repo.Write(u3))
+
+	got, err := repo.GetByUser("user-a")
+	require.NoError(t, err)
+	assert.Len(t, got, 2)
+	for _, u := range got {
+		assert.Equal(t, "user-a", u.UserID)
+	}
+
+	other, err := repo.GetByUser("user-b")
+	require.NoError(t, err)
+	assert.Len(t, other, 1)
+	assert.Equal(t, "user-b", other[0].UserID)
+
+	none, err := repo.GetByUser("nobody")
+	require.NoError(t, err)
+	assert.Empty(t, none)
+}

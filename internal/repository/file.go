@@ -79,6 +79,20 @@ func (repo *FileRepository) Get(code string) (model.URL, error) {
 	return url, nil
 }
 
+func (repo *FileRepository) GetByUser(userID string) ([]model.URL, error) {
+	repo.mutex.RLock()
+	defer repo.mutex.RUnlock()
+
+	urls := make([]model.URL, 0)
+	for _, url := range repo.store {
+		if url.UserID == userID {
+			urls = append(urls, url)
+		}
+	}
+
+	return urls, nil
+}
+
 func (repo *FileRepository) findByOriginal(original string) (model.URL, bool) {
 	for _, url := range repo.store {
 		if url.Original == original {

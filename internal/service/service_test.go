@@ -56,6 +56,16 @@ func (r *stubRepo) Get(code string) (model.URL, error) {
 	return u, nil
 }
 
+func (r *stubRepo) GetByUser(userID string) ([]model.URL, error) {
+	urls := make([]model.URL, 0)
+	for _, u := range r.urls {
+		if u.UserID == userID {
+			urls = append(urls, u)
+		}
+	}
+	return urls, nil
+}
+
 func TestShortenBatch(t *testing.T) {
 	repo := newStubRepo()
 	svc := New(repo, "http://localhost:8080", 5)
@@ -65,7 +75,7 @@ func TestShortenBatch(t *testing.T) {
 		{CorrelationID: "2", OriginalURL: "https://two.example"},
 	}
 
-	results, err := svc.ShortenBatch(items)
+	results, err := svc.ShortenBatch(items, "user-1")
 	require.NoError(t, err)
 	require.Len(t, results, 2)
 
@@ -77,6 +87,7 @@ func TestShortenBatch(t *testing.T) {
 		got, err := repo.Get(code)
 		require.NoError(t, err)
 		assert.Equal(t, items[i].OriginalURL, got.Original)
+		assert.Equal(t, "user-1", got.UserID)
 	}
 }
 
@@ -89,7 +100,7 @@ func TestShortenBatch_RetriesOnConflict(t *testing.T) {
 		{CorrelationID: "1", OriginalURL: "https://new.example"},
 	}
 
-	results, err := svc.ShortenBatch(items)
+	results, err := svc.ShortenBatch(items, "user-1")
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "1", results[0].CorrelationID)
@@ -105,14 +116,33 @@ func TestShorten_ExistingURLReturnsExistingShortURL(t *testing.T) {
 	repo := newStubRepo()
 	svc := New(repo, "http://localhost:8080", 5)
 
-	first, err := svc.Shorten("https://duplicate.example")
+	first, err := svc.Shorten("https://duplicate.example", "user-1")
 	require.NoError(t, err)
 
-	second, err := svc.Shorten("https://duplicate.example")
+	second, err := svc.Shorten("https://duplicate.example", "user-2")
 	require.ErrorIs(t, err, repository.ErrURLAlreadyExists)
 	assert.Equal(t, first, second)
 
 	got, err := repo.Get(strings.TrimPrefix(second, "http://localhost:8080/"))
 	require.NoError(t, err)
 	assert.Equal(t, "https://duplicate.example", got.Original)
+}
+
+func TestListByUser(t *testing.T) {
+	repo := newStubRepo()
+	svc := New(repo, "http://localhost:8080", 5)
+
+	_, err := svc.Shorten("https://one.example", "user-a")
+	require.NoError(t, err)
+	_, err = svc.Shorten("https://two.example", "user-b")
+	require.NoError(t, err)
+
+	urls, err := svc.ListByUser("user-a")
+	require.NoError(t, err)
+	require.Len(t, urls, 1)
+	assert.Equal(t, "https://one.example", urls[0].Original)
+
+	empty, err := svc.ListByUser("nobody")
+	require.NoError(t, err)
+	assert.Empty(t, empty)
 }
