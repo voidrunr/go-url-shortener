@@ -2,7 +2,7 @@ package main
 
 import (
 	"database/sql"
-	"log"
+	"github.com/rs/zerolog/log"
 	"net/http"
 
 	"github.com/voidrunr/go-url-shortener/internal/config"
@@ -18,7 +18,9 @@ func main() {
 
 	repo, db, err := buildRepository(cfg)
 	if err != nil {
-		log.Fatalf("Failed to create repository: %v", err)
+		log.Fatal()
+			 .Err(err)
+			 .Msgf("Failed to create repository: %v", err)
 	}
 	if db != nil {
 		defer db.Close()
@@ -37,6 +39,10 @@ func main() {
 	err = http.ListenAndServe(cfg.ServerAddress, hlr.Router())
 	if err != nil {
 		log.Fatalf("Server error: %v", err)
+
+		log.Fatal()
+			 .Err(err)
+			 .Msgf("Server error: %v", err)
 	}
 }
 
