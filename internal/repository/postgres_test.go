@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -60,16 +61,16 @@ func TestPostgresRepository(t *testing.T) {
 	})
 
 	t.Run("write and get", func(t *testing.T) {
-		require.NoError(t, repo.Write(url))
+		require.NoError(t, repo.Write(context.Background(), url))
 
-		got, err := repo.Get(code)
+		got, err := repo.Get(context.Background(), code)
 		require.NoError(t, err)
 		assert.Equal(t, url.Original, got.Original)
 		assert.Equal(t, url.Code, got.Code)
 	})
 
 	t.Run("duplicate code returns ErrConflict", func(t *testing.T) {
-		err := repo.Write(testURL(code, "https://other.com"))
+		err := repo.Write(context.Background(), testURL(code, "https://other.com"))
 		assert.ErrorIs(t, err, ErrConflict)
 	})
 
@@ -79,7 +80,7 @@ func TestPostgresRepository(t *testing.T) {
 			_, _ = db.Exec("DELETE FROM shortener_urls WHERE code = $1", code2)
 		})
 
-		err := repo.Write(testURL(code2, url.Original))
+		err := repo.Write(context.Background(), testURL(code2, url.Original))
 		var dupErr *DuplicateURLError
 		require.ErrorAs(t, err, &dupErr)
 		assert.ErrorIs(t, err, ErrURLAlreadyExists)
@@ -88,7 +89,7 @@ func TestPostgresRepository(t *testing.T) {
 	})
 
 	t.Run("unknown code returns ErrNotFound", func(t *testing.T) {
-		_, err := repo.Get("missing")
+		_, err := repo.Get(context.Background(), "missing")
 		assert.ErrorIs(t, err, ErrNotFound)
 	})
 }
@@ -126,13 +127,13 @@ func TestPostgresRepository_WriteBatch(t *testing.T) {
 	u2 := testURL(code2, "https://two.example")
 
 	t.Run("write batch and get", func(t *testing.T) {
-		require.NoError(t, repo.WriteBatch([]model.URL{u1, u2}))
+		require.NoError(t, repo.WriteBatch(context.Background(), []model.URL{u1, u2}))
 
-		got1, err := repo.Get(code1)
+		got1, err := repo.Get(context.Background(), code1)
 		require.NoError(t, err)
 		assert.Equal(t, u1.Original, got1.Original)
 
-		got2, err := repo.Get(code2)
+		got2, err := repo.Get(context.Background(), code2)
 		require.NoError(t, err)
 		assert.Equal(t, u2.Original, got2.Original)
 	})
@@ -143,13 +144,35 @@ func TestPostgresRepository_WriteBatch(t *testing.T) {
 			_, _ = db.Exec("DELETE FROM shortener_urls WHERE code = $1", code3)
 		})
 
-		err := repo.WriteBatch([]model.URL{
+		err := repo.WriteBatch(context.Background(), []model.URL{
 			testURL(code3, "https://three.example"),
 			testURL(code1, "https://conflict.example"),
 		})
 		assert.ErrorIs(t, err, ErrConflict)
 
-		_, err = repo.Get(code3)
+		_, err = repo.Get(context.Background(), code3)
+		assert.ErrorIs(t, err, ErrNotFound)
+	})
+
+	t.Run("batch duplicate original returns DuplicateURLError", func(t *testing.T) {
+		dupCode := fmt.Sprintf("pgb%d", time.Now().UnixNano()+5)
+		t.Cleanup(func() {
+			_, _ = db.Exec("DELETE FROM shortener_urls WHERE code = $1", dupCode)
+		})
+
+		err := repo.Write(context.Background(), testURL(dupCode, "https://dup.example"))
+		require.NoError(t, err)
+
+		newCode := fmt.Sprintf("pgb%d", time.Now().UnixNano()+6)
+		err = repo.WriteBatch(context.Background(), []model.URL{
+			testURL(newCode, "https://dup.example"),
+		})
+		var dupErr *DuplicateURLError
+		require.ErrorAs(t, err, &dupErr)
+		assert.ErrorIs(t, err, ErrURLAlreadyExists)
+		assert.Equal(t, dupCode, dupErr.URL.Code)
+
+		_, err = repo.Get(context.Background(), newCode)
 		assert.ErrorIs(t, err, ErrNotFound)
 	})
 }

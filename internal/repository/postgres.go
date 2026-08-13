@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -19,15 +21,13 @@ func NewPostgres(db *sql.DB) *PostgresRepository {
 	return &PostgresRepository{db: db}
 }
 
-func (repo *PostgresRepository) Write(url model.URL) error {
+func (repo *PostgresRepository) Write(ctx context.Context, url model.URL) error {
 	const query = `
 		INSERT INTO shortener_urls (code, original_url, created_at, updated_at)
 		VALUES ($1, $2, $3, $4)
 		ON CONFLICT (original_url) DO NOTHING
 		RETURNING code
 	`
-
-	ctx := context.Background()
 
 	var insertedCode string
 	err := repo.db.QueryRowContext(
@@ -56,13 +56,25 @@ func (repo *PostgresRepository) Write(url model.URL) error {
 	return nil
 }
 
-func (repo *PostgresRepository) WriteBatch(urls []model.URL) error {
-	const query = `
-		INSERT INTO shortener_urls (code, original_url, created_at, updated_at)
-		VALUES ($1, $2, $3, $4)
-	`
+func (repo *PostgresRepository) WriteBatch(ctx context.Context, urls []model.URL) error {
+	if len(urls) == 0 {
+		return nil
+	}
 
-	ctx := context.Background()
+	valueStrings := make([]string, 0, len(urls))
+	valueArgs := make([]any, 0, len(urls)*4)
+	for i, url := range urls {
+		valueStrings = append(valueStrings, fmt.Sprintf("($%d, $%d, $%d, $%d)", i*4+1, i*4+2, i*4+3, i*4+4))
+		valueArgs = append(valueArgs, url.Code, url.Original, url.CreatedAt, url.UpdatedAt)
+	}
+
+	query := fmt.Sprintf(
+		`INSERT INTO shortener_urls (code, original_url, created_at, updated_at)
+		 VALUES %s
+		 ON CONFLICT (original_url) DO NOTHING
+		 RETURNING code`,
+		strings.Join(valueStrings, ","),
+	)
 
 	tx, err := repo.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -70,26 +82,35 @@ func (repo *PostgresRepository) WriteBatch(urls []model.URL) error {
 	}
 	defer tx.Rollback()
 
-	stmt, err := tx.PrepareContext(ctx, query)
+	rows, err := tx.QueryContext(ctx, query, valueArgs...)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
+			return ErrConflict
+		}
 		return err
 	}
-	defer stmt.Close()
+	defer rows.Close()
+
+	inserted := make(map[string]struct{}, len(urls))
+	for rows.Next() {
+		var code string
+		if err := rows.Scan(&code); err != nil {
+			return err
+		}
+		inserted[code] = struct{}{}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
 
 	for _, url := range urls {
-		_, err := stmt.ExecContext(
-			ctx,
-			url.Code,
-			url.Original,
-			url.CreatedAt,
-			url.UpdatedAt,
-		)
-		if err != nil {
-			var pgErr *pgconn.PgError
-			if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
-				return ErrConflict
+		if _, ok := inserted[url.Code]; !ok {
+			existing, findErr := repo.getByOriginal(ctx, url.Original)
+			if findErr != nil {
+				return findErr
 			}
-			return err
+			return &DuplicateURLError{URL: existing}
 		}
 	}
 
@@ -116,7 +137,7 @@ func (repo *PostgresRepository) getByOriginal(ctx context.Context, original stri
 	return url, nil
 }
 
-func (repo *PostgresRepository) Get(code string) (model.URL, error) {
+func (repo *PostgresRepository) Get(ctx context.Context, code string) (model.URL, error) {
 	const query = `
 		SELECT code, original_url, created_at, updated_at
 		FROM shortener_urls
@@ -124,7 +145,7 @@ func (repo *PostgresRepository) Get(code string) (model.URL, error) {
 	`
 
 	var url model.URL
-	err := repo.db.QueryRowContext(context.Background(), query, code).
+	err := repo.db.QueryRowContext(ctx, query, code).
 		Scan(&url.Code, &url.Original, &url.CreatedAt, &url.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.URL{}, ErrNotFound
