@@ -65,44 +65,36 @@ func (srv URLService) Shorten(originalURL string) (string, error) {
 			return "", err
 		}
 
-		_, err = srv.repo.Get(context.TODO(), code)
-		if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		now := time.Now()
+
+		uuid, err := generateUUID()
+		if err != nil {
 			return "", err
 		}
 
-		if errors.Is(err, repository.ErrNotFound) {
-			now := time.Now()
-
-			uuid, err := generateUUID()
-			if err != nil {
-				return "", err
-			}
-
-			u := model.URL{
-				UUID:      uuid,
-				Original:  originalURL,
-				Code:      code,
-				CreatedAt: now,
-				UpdatedAt: now,
-			}
-
-			if err := srv.repo.Write(context.TODO(), u); err != nil {
-				var dupErr *repository.DuplicateURLError
-				if errors.As(err, &dupErr) {
-					shortURL, joinErr := url.JoinPath(srv.baseURL, dupErr.URL.Code)
-					if joinErr != nil {
-						return "", joinErr
-					}
-					return shortURL, repository.ErrURLAlreadyExists
-				}
-				if errors.Is(err, repository.ErrConflict) {
-					continue
-				}
-				return "", err
-			}
-
-			return url.JoinPath(srv.baseURL, code)
+		u := model.URL{
+			UUID:      uuid,
+			Original:  originalURL,
+			Code:      code,
+			CreatedAt: now,
+			UpdatedAt: now,
 		}
+
+		if err := srv.repo.Write(context.TODO(), u); err != nil {
+			if dupErr, ok := errors.AsType[*repository.DuplicateURLError](err); ok {
+				shortURL, joinErr := url.JoinPath(srv.baseURL, dupErr.URL.Code)
+				if joinErr != nil {
+					return "", joinErr
+				}
+				return shortURL, repository.ErrURLAlreadyExists
+			}
+			if errors.Is(err, repository.ErrConflict) {
+				continue
+			}
+			return "", err
+		}
+
+		return url.JoinPath(srv.baseURL, code)
 	}
 
 	return "", fmt.Errorf("failed to generate unique code after %d attempts", srv.collisionRetries)

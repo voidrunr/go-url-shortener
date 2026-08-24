@@ -13,10 +13,12 @@ import (
 )
 
 type stubRepo struct {
-	urls       map[string]model.URL
-	writeCalls int
-	conflicts  int
-	duplicate  bool
+	urls            map[string]model.URL
+	writeCalls      int
+	batchWriteCalls int
+	conflicts       int
+	conflictOnWrite int
+	duplicate       bool
 }
 
 func newStubRepo() *stubRepo {
@@ -24,6 +26,11 @@ func newStubRepo() *stubRepo {
 }
 
 func (r *stubRepo) Write(ctx context.Context, url model.URL) error {
+	r.writeCalls++
+	if r.conflictOnWrite > 0 {
+		r.conflictOnWrite--
+		return repository.ErrConflict
+	}
 	for _, existing := range r.urls {
 		if existing.Original == url.Original {
 			return &repository.DuplicateURLError{URL: existing}
@@ -37,7 +44,7 @@ func (r *stubRepo) Write(ctx context.Context, url model.URL) error {
 }
 
 func (r *stubRepo) WriteBatch(ctx context.Context, urls []model.URL) error {
-	r.writeCalls++
+	r.batchWriteCalls++
 	if r.duplicate {
 		return &repository.DuplicateURLError{URL: model.URL{Code: "existing", Original: urls[0].Original}}
 	}
@@ -98,7 +105,7 @@ func TestShortenBatch_RetriesOnConflict(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, results, 1)
 	assert.Equal(t, "1", results[0].CorrelationID)
-	assert.Equal(t, 3, repo.writeCalls)
+	assert.Equal(t, 3, repo.batchWriteCalls)
 
 	code := strings.TrimPrefix(results[0].ShortURL, "http://localhost:8080/")
 	got, err := repo.Get(context.Background(), code)
@@ -120,7 +127,7 @@ func TestShortenBatch_DuplicateURLDoesNotRetry(t *testing.T) {
 
 	var dupErr *repository.DuplicateURLError
 	require.ErrorAs(t, err, &dupErr)
-	assert.Equal(t, 1, repo.writeCalls)
+	assert.Equal(t, 1, repo.batchWriteCalls)
 }
 
 func TestShorten_ExistingURLReturnsExistingShortURL(t *testing.T) {
@@ -137,4 +144,19 @@ func TestShorten_ExistingURLReturnsExistingShortURL(t *testing.T) {
 	got, err := repo.Get(context.Background(), strings.TrimPrefix(second, "http://localhost:8080/"))
 	require.NoError(t, err)
 	assert.Equal(t, "https://duplicate.example", got.Original)
+}
+
+func TestShorten_RetriesOnConflict(t *testing.T) {
+	repo := newStubRepo()
+	repo.conflictOnWrite = 1
+	svc := New(repo, "http://localhost:8080", 5)
+
+	shortURL, err := svc.Shorten("https://retry.example")
+	require.NoError(t, err)
+	assert.Equal(t, 2, repo.writeCalls)
+
+	code := strings.TrimPrefix(shortURL, "http://localhost:8080/")
+	got, err := repo.Get(context.Background(), code)
+	require.NoError(t, err)
+	assert.Equal(t, "https://retry.example", got.Original)
 }
