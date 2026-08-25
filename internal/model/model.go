@@ -10,3 +10,9 @@ type URL struct {
 	UpdatedAt time.Time  `json:"-"`
 	ExpiresAt *time.Time `json:"-"`
 }
+
+type BatchItem struct {
+	CorrelationID string
+	OriginalURL   string
+	ShortURL      string
+}

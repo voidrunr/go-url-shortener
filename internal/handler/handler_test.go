@@ -1,7 +1,9 @@
 package handler_test
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,11 +15,16 @@ import (
 
 	"github.com/voidrunr/go-url-shortener/internal/handler"
 	"github.com/voidrunr/go-url-shortener/internal/handler/mocks"
+	"github.com/voidrunr/go-url-shortener/internal/model"
 	"github.com/voidrunr/go-url-shortener/internal/repository"
 )
 
 func newHandler(svc handler.Shortener) http.Handler {
 	return handler.New(svc).Router()
+}
+
+func newHandlerWithPinger(svc handler.Shortener, p handler.Pinger) http.Handler {
+	return handler.New(svc, handler.WithPinger(p)).Router()
 }
 
 // --- POST / ---
@@ -63,6 +70,18 @@ func TestHandleShorten(t *testing.T) {
 				m.EXPECT().Shorten("https://example.com").Return("", io.ErrUnexpectedEOF)
 			},
 			want: want{code: http.StatusInternalServerError},
+		},
+		{
+			name: "duplicate URL returns 409 with existing short URL",
+			body: "https://practicum.yandex.ru/",
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().Shorten("https://practicum.yandex.ru/").Return("http://localhost:8080/EwHXdJfB", repository.ErrURLAlreadyExists)
+			},
+			want: want{
+				code:        http.StatusConflict,
+				body:        "http://localhost:8080/EwHXdJfB",
+				contentType: "text/plain",
+			},
 		},
 	}
 
@@ -151,6 +170,18 @@ func TestHandleAPIShorten(t *testing.T) {
 				m.EXPECT().Shorten("https://example.com").Return("", io.ErrUnexpectedEOF)
 			},
 			want: want{code: http.StatusInternalServerError},
+		},
+		{
+			name: "duplicate URL returns 409 with existing short URL",
+			body: `{"url":"https://practicum.yandex.ru/"}`,
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().Shorten("https://practicum.yandex.ru/").Return("http://localhost:8080/EwHXdJfB", repository.ErrURLAlreadyExists)
+			},
+			want: want{
+				code:        http.StatusConflict,
+				result:      "http://localhost:8080/EwHXdJfB",
+				contentType: "application/json",
+			},
 		},
 	}
 
@@ -289,6 +320,143 @@ func TestHandleResolve(t *testing.T) {
 			if tt.want.location != "" {
 				assert.Equal(t, tt.want.location, res.Header.Get("Location"))
 			}
+		})
+	}
+}
+
+// --- POST /api/shorten/batch ---
+
+func TestHandleAPIShortenBatch(t *testing.T) {
+	type want struct {
+		code        int
+		contentType string
+	}
+	tests := []struct {
+		name  string
+		body  string
+		setup func(*mocks.Shortener)
+		want  want
+	}{
+		{
+			name: "valid batch returns 201 and JSON results",
+			body: `[{"correlation_id":"1","original_url":"https://one.example"},{"correlation_id":"2","original_url":"https://two.example"}]`,
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().ShortenBatch([]model.BatchItem{
+					{CorrelationID: "1", OriginalURL: "https://one.example"},
+					{CorrelationID: "2", OriginalURL: "https://two.example"},
+				}).Return([]model.BatchItem{
+					{CorrelationID: "1", ShortURL: "http://localhost:8080/a"},
+					{CorrelationID: "2", ShortURL: "http://localhost:8080/b"},
+				}, nil)
+			},
+			want: want{code: http.StatusCreated, contentType: "application/json"},
+		},
+		{
+			name: "empty batch returns 400",
+			body: `[]`,
+			want: want{code: http.StatusBadRequest},
+		},
+		{
+			name: "invalid JSON returns 400",
+			body: `not json`,
+			want: want{code: http.StatusBadRequest},
+		},
+		{
+			name: "empty original_url returns 400",
+			body: `[{"correlation_id":"1","original_url":""}]`,
+			want: want{code: http.StatusBadRequest},
+		},
+		{
+			name: "service error returns 500",
+			body: `[{"correlation_id":"1","original_url":"https://one.example"}]`,
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().ShortenBatch([]model.BatchItem{
+					{CorrelationID: "1", OriginalURL: "https://one.example"},
+				}).Return(nil, io.ErrUnexpectedEOF)
+			},
+			want: want{code: http.StatusInternalServerError},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := mocks.NewShortener(t)
+			if tt.setup != nil {
+				tt.setup(svc)
+			}
+
+			req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", strings.NewReader(tt.body))
+			w := httptest.NewRecorder()
+
+			newHandler(svc).ServeHTTP(w, req)
+
+			res := w.Result()
+			defer res.Body.Close()
+
+			assert.Equal(t, tt.want.code, res.StatusCode)
+
+			if tt.want.contentType != "" {
+				assert.Equal(t, tt.want.contentType, res.Header.Get("Content-Type"))
+			}
+
+			if tt.want.code == http.StatusCreated {
+				var resp []struct {
+					CorrelationID string `json:"correlation_id"`
+					ShortURL      string `json:"short_url"`
+				}
+				err := json.NewDecoder(res.Body).Decode(&resp)
+				require.NoError(t, err)
+				assert.Len(t, resp, 2)
+				assert.Equal(t, "1", resp[0].CorrelationID)
+				assert.Equal(t, "http://localhost:8080/a", resp[0].ShortURL)
+				assert.Equal(t, "2", resp[1].CorrelationID)
+				assert.Equal(t, "http://localhost:8080/b", resp[1].ShortURL)
+			}
+		})
+	}
+}
+
+// --- GET /ping ---
+
+type pingerStub struct {
+	err error
+}
+
+func (p pingerStub) PingContext(context.Context) error {
+	return p.err
+}
+
+func TestHandlePing(t *testing.T) {
+	tests := []struct {
+		name   string
+		pinger handler.Pinger
+		want   int
+	}{
+		{
+			name:   "database reachable returns 200",
+			pinger: pingerStub{},
+			want:   http.StatusOK,
+		},
+		{
+			name:   "database unreachable returns 500",
+			pinger: pingerStub{err: errors.New("connection refused")},
+			want:   http.StatusInternalServerError,
+		},
+		{
+			name:   "no database configured returns 500",
+			pinger: nil,
+			want:   http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+			w := httptest.NewRecorder()
+
+			newHandlerWithPinger(mocks.NewShortener(t), tt.pinger).ServeHTTP(w, req)
+
+			assert.Equal(t, tt.want, w.Code)
 		})
 	}
 }

@@ -1,0 +1,30 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: go-url-shortener-postgres
+    environment:
+      POSTGRES_USER: shortener
+      POSTGRES_PASSWORD: shortener
+      POSTGRES_DB: shortener
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shortener -d shortener"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  dbgate:
+    image: dbgate/dbgate
+    container_name: go-url-shortener-dbgate
+    depends_on:
+      - postgres
+    environment:
+      CONN_connections: '[{"name":"local-postgres","engine":"postgresql","host":"postgres","port":5432,"user":"shortener","password":"shortener","database":"shortener"}]'
+    ports:
+      - "3000:3000"
+
+volumes:
+  postgres_data:

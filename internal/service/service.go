@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/hex"
@@ -14,8 +15,9 @@ import (
 )
 
 type Repository interface {
-	Write(model.URL) error
-	Get(string) (model.URL, error)
+	Write(ctx context.Context, url model.URL) error
+	WriteBatch(ctx context.Context, urls []model.URL) error
+	Get(ctx context.Context, code string) (model.URL, error)
 }
 
 type URLService struct {
@@ -63,43 +65,95 @@ func (srv URLService) Shorten(originalURL string) (string, error) {
 			return "", err
 		}
 
-		_, err = srv.repo.Get(code)
-		if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		now := time.Now()
+
+		uuid, err := generateUUID()
+		if err != nil {
 			return "", err
 		}
 
-		if errors.Is(err, repository.ErrNotFound) {
-			now := time.Now()
-
-			uuid, err := generateUUID()
-			if err != nil {
-				return "", err
-			}
-
-			u := model.URL{
-				UUID:      uuid,
-				Original:  originalURL,
-				Code:      code,
-				CreatedAt: now,
-				UpdatedAt: now,
-			}
-
-			if err := srv.repo.Write(u); err != nil {
-				if errors.Is(err, repository.ErrConflict) {
-					continue
-				}
-				return "", err
-			}
-
-			return url.JoinPath(srv.baseURL, code)
+		u := model.URL{
+			UUID:      uuid,
+			Original:  originalURL,
+			Code:      code,
+			CreatedAt: now,
+			UpdatedAt: now,
 		}
+
+		if err := srv.repo.Write(context.TODO(), u); err != nil {
+			if dupErr, ok := errors.AsType[*repository.DuplicateURLError](err); ok {
+				shortURL, joinErr := url.JoinPath(srv.baseURL, dupErr.URL.Code)
+				if joinErr != nil {
+					return "", joinErr
+				}
+				return shortURL, repository.ErrURLAlreadyExists
+			}
+			if errors.Is(err, repository.ErrConflict) {
+				continue
+			}
+			return "", err
+		}
+
+		return url.JoinPath(srv.baseURL, code)
 	}
 
 	return "", fmt.Errorf("failed to generate unique code after %d attempts", srv.collisionRetries)
 }
 
+func (srv URLService) ShortenBatch(items []model.BatchItem) ([]model.BatchItem, error) {
+	unlimited := srv.collisionRetries <= 0
+
+	for i := 0; unlimited || i < srv.collisionRetries; i++ {
+		now := time.Now()
+
+		urls := make([]model.URL, 0, len(items))
+		result := make([]model.BatchItem, 0, len(items))
+
+		for _, item := range items {
+			code, err := generateCode(6)
+			if err != nil {
+				return nil, err
+			}
+
+			uuid, err := generateUUID()
+			if err != nil {
+				return nil, err
+			}
+
+			urls = append(urls, model.URL{
+				UUID:      uuid,
+				Original:  item.OriginalURL,
+				Code:      code,
+				CreatedAt: now,
+				UpdatedAt: now,
+			})
+
+			shortURL, err := url.JoinPath(srv.baseURL, code)
+			if err != nil {
+				return nil, err
+			}
+
+			result = append(result, model.BatchItem{
+				CorrelationID: item.CorrelationID,
+				ShortURL:      shortURL,
+			})
+		}
+
+		if err := srv.repo.WriteBatch(context.TODO(), urls); err != nil {
+			if errors.Is(err, repository.ErrConflict) {
+				continue
+			}
+			return nil, err
+		}
+
+		return result, nil
+	}
+
+	return nil, fmt.Errorf("failed to generate unique codes after %d attempts", srv.collisionRetries)
+}
+
 func (srv URLService) Resolve(code string) (string, error) {
-	url, err := srv.repo.Get(code)
+	url, err := srv.repo.Get(context.TODO(), code)
 	if err != nil {
 		if errors.Is(err, repository.ErrNotFound) {
 			return "", repository.ErrNotFound
