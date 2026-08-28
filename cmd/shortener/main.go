@@ -2,8 +2,11 @@ package main
 
 import (
 	"database/sql"
-	"log"
 	"net/http"
+	"os"
+
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 
 	"github.com/voidrunr/go-url-shortener/internal/auth"
 	"github.com/voidrunr/go-url-shortener/internal/config"
@@ -15,11 +18,13 @@ import (
 )
 
 func main() {
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
+
 	cfg := config.Parse()
 
 	repo, db, err := buildRepository(cfg)
 	if err != nil {
-		log.Fatalf("Failed to create repository: %v", err)
+		log.Fatal().Err(err).Msg("failed to create repository")
 	}
 	if db != nil {
 		defer db.Close()
@@ -30,17 +35,18 @@ func main() {
 	opts := []handler.Option{
 		handler.WithAuth(auth.New(cfg.SecretKey)),
 		handler.WithBaseURL(cfg.BaseURL),
+		handler.WithLogger(log.Logger),
 	}
 	if db != nil {
 		opts = append(opts, handler.WithPinger(db))
 	}
 	hlr := handler.New(svc, opts...)
 
-	log.Printf("Serving on %s", cfg.ServerAddress)
+	log.Info().Str("address", cfg.ServerAddress).Msg("serving")
 
 	err = http.ListenAndServe(cfg.ServerAddress, hlr.Router())
 	if err != nil {
-		log.Fatalf("Server error: %v", err)
+		log.Fatal().Err(err).Msg("server error")
 	}
 }
 

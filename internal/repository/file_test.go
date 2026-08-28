@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
@@ -17,12 +18,12 @@ func TestFileRepository_Persistence(t *testing.T) {
 	require.NoError(t, err)
 
 	url := testURL("abc123", "https://example.com")
-	require.NoError(t, repo.Write(url))
+	require.NoError(t, repo.Write(context.Background(), url))
 
 	reopened, err := NewFile(path)
 	require.NoError(t, err)
 
-	got, err := reopened.Get("abc123")
+	got, err := reopened.Get(context.Background(), "abc123")
 	require.NoError(t, err)
 	assert.Equal(t, url.Original, got.Original)
 	assert.Equal(t, url.Code, got.Code)
@@ -32,7 +33,7 @@ func TestFileRepository_NotFound(t *testing.T) {
 	repo, err := NewFile(filepath.Join(t.TempDir(), "data.json"))
 	require.NoError(t, err)
 
-	_, err = repo.Get("missing")
+	_, err = repo.Get(context.Background(), "missing")
 	assert.ErrorIs(t, err, ErrNotFound)
 }
 
@@ -40,9 +41,9 @@ func TestFileRepository_Conflict(t *testing.T) {
 	repo, err := NewFile(filepath.Join(t.TempDir(), "data.json"))
 	require.NoError(t, err)
 
-	require.NoError(t, repo.Write(testURL("abc123", "https://example.com")))
+	require.NoError(t, repo.Write(context.Background(), testURL("abc123", "https://example.com")))
 
-	err = repo.Write(testURL("abc123", "https://other.com"))
+	err = repo.Write(context.Background(), testURL("abc123", "https://other.com"))
 	assert.ErrorIs(t, err, ErrConflict)
 }
 
@@ -50,9 +51,9 @@ func TestFileRepository_DuplicateOriginal(t *testing.T) {
 	repo, err := NewFile(filepath.Join(t.TempDir(), "data.json"))
 	require.NoError(t, err)
 
-	require.NoError(t, repo.Write(testURL("abc123", "https://example.com")))
+	require.NoError(t, repo.Write(context.Background(), testURL("abc123", "https://example.com")))
 
-	err = repo.Write(testURL("xyz789", "https://example.com"))
+	err = repo.Write(context.Background(), testURL("xyz789", "https://example.com"))
 	var dupErr *DuplicateURLError
 	require.ErrorAs(t, err, &dupErr)
 	assert.ErrorIs(t, err, ErrURLAlreadyExists)
@@ -74,16 +75,16 @@ func TestFileRepository_WriteBatch(t *testing.T) {
 
 	u1 := testURL("b1", "https://one.example")
 	u2 := testURL("b2", "https://two.example")
-	require.NoError(t, repo.WriteBatch([]model.URL{u1, u2}))
+	require.NoError(t, repo.WriteBatch(context.Background(), []model.URL{u1, u2}))
 
 	reopened, err := NewFile(path)
 	require.NoError(t, err)
 
-	got1, err := reopened.Get("b1")
+	got1, err := reopened.Get(context.Background(), "b1")
 	require.NoError(t, err)
 	assert.Equal(t, u1.Original, got1.Original)
 
-	got2, err := reopened.Get("b2")
+	got2, err := reopened.Get(context.Background(), "b2")
 	require.NoError(t, err)
 	assert.Equal(t, u2.Original, got2.Original)
 }
@@ -92,14 +93,14 @@ func TestFileRepository_WriteBatchConflict(t *testing.T) {
 	repo, err := NewFile(filepath.Join(t.TempDir(), "data.json"))
 	require.NoError(t, err)
 
-	require.NoError(t, repo.Write(testURL("b1", "https://one.example")))
+	require.NoError(t, repo.Write(context.Background(), testURL("b1", "https://one.example")))
 
-	err = repo.WriteBatch([]model.URL{
+	err = repo.WriteBatch(context.Background(), []model.URL{
 		testURL("b2", "https://two.example"),
 		testURL("b1", "https://conflict.example"),
 	})
 	assert.ErrorIs(t, err, ErrConflict)
 
-	_, err = repo.Get("b2")
+	_, err = repo.Get(context.Background(), "b2")
 	assert.ErrorIs(t, err, ErrNotFound)
 }
