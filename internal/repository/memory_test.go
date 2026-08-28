@@ -75,6 +75,36 @@ func TestMemoryRepository(t *testing.T) {
 		assert.ErrorIs(t, err, ErrNotFound)
 	})
 
+	t.Run("get by user", func(t *testing.T) {
+		repo := NewMemory()
+		u1 := testURL("d1", "https://one.example")
+		u1.UserID = "user-a"
+		u2 := testURL("d2", "https://two.example")
+		u2.UserID = "user-a"
+		u3 := testURL("d3", "https://three.example")
+		u3.UserID = "user-b"
+
+		require.NoError(t, repo.Write(context.Background(), u1))
+		require.NoError(t, repo.Write(context.Background(), u2))
+		require.NoError(t, repo.Write(context.Background(), u3))
+
+		got, err := repo.GetByUser("user-a")
+		require.NoError(t, err)
+		assert.Len(t, got, 2)
+
+		for _, u := range got {
+			assert.Equal(t, "user-a", u.UserID)
+		}
+
+		other, err := repo.GetByUser("user-b")
+		require.NoError(t, err)
+		assert.Len(t, other, 1)
+
+		none, err := repo.GetByUser("nobody")
+		require.NoError(t, err)
+		assert.Empty(t, none)
+	})
+
 	t.Run("repeated write is preserved", func(t *testing.T) {
 		repo := NewMemory()
 		u1 := testURL("c1", "https://one.example")
@@ -90,6 +120,34 @@ func TestMemoryRepository(t *testing.T) {
 		got2, err := repo.Get(context.Background(), "c2")
 		require.NoError(t, err)
 		assert.Equal(t, u2.Original, got2.Original)
+	})
+
+	t.Run("delete batch only affects owned urls", func(t *testing.T) {
+		repo := NewMemory()
+		u1 := testURL("e1", "https://one.delete.example")
+		u1.UserID = "user-a"
+		u2 := testURL("e2", "https://two.delete.example")
+		u2.UserID = "user-a"
+		u3 := testURL("e3", "https://three.delete.example")
+		u3.UserID = "user-b"
+
+		require.NoError(t, repo.Write(context.Background(), u1))
+		require.NoError(t, repo.Write(context.Background(), u2))
+		require.NoError(t, repo.Write(context.Background(), u3))
+
+		require.NoError(t, repo.DeleteBatch("user-a", []string{"e1", "e2", "missing"}))
+
+		got1, err := repo.Get(context.Background(), "e1")
+		require.NoError(t, err)
+		assert.True(t, got1.Deleted)
+
+		got2, err := repo.Get(context.Background(), "e2")
+		require.NoError(t, err)
+		assert.True(t, got2.Deleted)
+
+		got3, err := repo.Get(context.Background(), "e3")
+		require.NoError(t, err)
+		assert.False(t, got3.Deleted)
 	})
 }
 

@@ -11,6 +11,7 @@ type Config struct {
 	CollisionRetries int
 	FileStoragePath  string
 	DatabaseDSN      string
+	SecretKey        string
 }
 
 func Parse() Config {
@@ -21,6 +22,7 @@ func Parse() Config {
 	flag.IntVar(&cfg.CollisionRetries, "m", 5, "max code generation attempts (0 or -1 for unlimited)")
 	flag.StringVar(&cfg.FileStoragePath, "f", "", "file path for URL storage")
 	flag.StringVar(&cfg.DatabaseDSN, "d", "", "database DSN")
+	flag.StringVar(&cfg.SecretKey, "secret-key", "", "secret key for signing auth cookies")
 	flag.Parse()
 
 	env := map[string]*string{
@@ -28,6 +30,7 @@ func Parse() Config {
 		"BASE_URL":          &cfg.BaseURL,
 		"FILE_STORAGE_PATH": &cfg.FileStoragePath,
 		"DATABASE_DSN":      &cfg.DatabaseDSN,
+		"SECRET_KEY":        &cfg.SecretKey,
 	}
 	for name, target := range env {
 		if val := os.Getenv(name); val != "" {

@@ -11,8 +11,10 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/voidrunr/go-url-shortener/internal/auth"
 	"github.com/voidrunr/go-url-shortener/internal/handler"
 	"github.com/voidrunr/go-url-shortener/internal/handler/mocks"
 	"github.com/voidrunr/go-url-shortener/internal/model"
@@ -25,6 +27,10 @@ func newHandler(svc handler.Shortener) http.Handler {
 
 func newHandlerWithPinger(svc handler.Shortener, p handler.Pinger) http.Handler {
 	return handler.New(svc, handler.WithPinger(p)).Router()
+}
+
+func newHandlerWithAuth(svc handler.Shortener, a *auth.Auth) http.Handler {
+	return handler.New(svc, handler.WithAuth(a), handler.WithBaseURL("http://localhost:8080")).Router()
 }
 
 // --- POST / ---
@@ -45,7 +51,7 @@ func TestHandleShorten(t *testing.T) {
 			name: "valid URL returns 201 and short URL",
 			body: "https://practicum.yandex.ru/",
 			setup: func(m *mocks.Shortener) {
-				m.EXPECT().Shorten("https://practicum.yandex.ru/").Return("http://localhost:8080/EwHXdJfB", nil)
+				m.EXPECT().Shorten("https://practicum.yandex.ru/", "").Return("http://localhost:8080/EwHXdJfB", nil)
 			},
 			want: want{
 				code:        http.StatusCreated,
@@ -67,7 +73,7 @@ func TestHandleShorten(t *testing.T) {
 			name: "service error returns 500",
 			body: "https://example.com",
 			setup: func(m *mocks.Shortener) {
-				m.EXPECT().Shorten("https://example.com").Return("", io.ErrUnexpectedEOF)
+				m.EXPECT().Shorten("https://example.com", "").Return("", io.ErrUnexpectedEOF)
 			},
 			want: want{code: http.StatusInternalServerError},
 		},
@@ -75,7 +81,7 @@ func TestHandleShorten(t *testing.T) {
 			name: "duplicate URL returns 409 with existing short URL",
 			body: "https://practicum.yandex.ru/",
 			setup: func(m *mocks.Shortener) {
-				m.EXPECT().Shorten("https://practicum.yandex.ru/").Return("http://localhost:8080/EwHXdJfB", repository.ErrURLAlreadyExists)
+				m.EXPECT().Shorten("https://practicum.yandex.ru/", "").Return("http://localhost:8080/EwHXdJfB", repository.ErrURLAlreadyExists)
 			},
 			want: want{
 				code:        http.StatusConflict,
@@ -135,7 +141,7 @@ func TestHandleAPIShorten(t *testing.T) {
 			name: "valid URL returns 201 and JSON with result",
 			body: `{"url":"https://practicum.yandex.ru/"}`,
 			setup: func(m *mocks.Shortener) {
-				m.EXPECT().Shorten("https://practicum.yandex.ru/").Return("http://localhost:8080/EwHXdJfB", nil)
+				m.EXPECT().Shorten("https://practicum.yandex.ru/", "").Return("http://localhost:8080/EwHXdJfB", nil)
 			},
 			want: want{
 				code:        http.StatusCreated,
@@ -167,7 +173,7 @@ func TestHandleAPIShorten(t *testing.T) {
 			name: "service error returns 500",
 			body: `{"url":"https://example.com"}`,
 			setup: func(m *mocks.Shortener) {
-				m.EXPECT().Shorten("https://example.com").Return("", io.ErrUnexpectedEOF)
+				m.EXPECT().Shorten("https://example.com", "").Return("", io.ErrUnexpectedEOF)
 			},
 			want: want{code: http.StatusInternalServerError},
 		},
@@ -175,7 +181,7 @@ func TestHandleAPIShorten(t *testing.T) {
 			name: "duplicate URL returns 409 with existing short URL",
 			body: `{"url":"https://practicum.yandex.ru/"}`,
 			setup: func(m *mocks.Shortener) {
-				m.EXPECT().Shorten("https://practicum.yandex.ru/").Return("http://localhost:8080/EwHXdJfB", repository.ErrURLAlreadyExists)
+				m.EXPECT().Shorten("https://practicum.yandex.ru/", "").Return("http://localhost:8080/EwHXdJfB", repository.ErrURLAlreadyExists)
 			},
 			want: want{
 				code:        http.StatusConflict,
@@ -344,7 +350,7 @@ func TestHandleAPIShortenBatch(t *testing.T) {
 				m.EXPECT().ShortenBatch([]model.BatchItem{
 					{CorrelationID: "1", OriginalURL: "https://one.example"},
 					{CorrelationID: "2", OriginalURL: "https://two.example"},
-				}).Return([]model.BatchItem{
+				}, "").Return([]model.BatchItem{
 					{CorrelationID: "1", ShortURL: "http://localhost:8080/a"},
 					{CorrelationID: "2", ShortURL: "http://localhost:8080/b"},
 				}, nil)
@@ -372,7 +378,7 @@ func TestHandleAPIShortenBatch(t *testing.T) {
 			setup: func(m *mocks.Shortener) {
 				m.EXPECT().ShortenBatch([]model.BatchItem{
 					{CorrelationID: "1", OriginalURL: "https://one.example"},
-				}).Return(nil, io.ErrUnexpectedEOF)
+				}, "").Return(nil, io.ErrUnexpectedEOF)
 			},
 			want: want{code: http.StatusInternalServerError},
 		},
@@ -499,4 +505,211 @@ func TestRoute_UnsupportedMethods(t *testing.T) {
 			assert.Equal(t, tt.want.code, w.Code)
 		})
 	}
+}
+
+// --- GET /api/user/urls ---
+
+func TestHandleUserURLs(t *testing.T) {
+	tests := []struct {
+		name        string
+		sendCookie  bool
+		cookieUser  string
+		setup       func(*mocks.Shortener)
+		wantCode    int
+		wantNoBody  bool
+		wantResults []map[string]string
+	}{
+		{
+			name:       "no cookie creates user and returns 204 for empty list",
+			wantCode:   http.StatusNoContent,
+			sendCookie: false,
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().ListByUser(mock.AnythingOfType("string")).Return(nil, nil)
+			},
+		},
+		{
+			name:       "cookie without user id returns 401",
+			sendCookie: true,
+			wantCode:   http.StatusUnauthorized,
+		},
+		{
+			name:       "empty list for existing user returns 204",
+			sendCookie: true,
+			cookieUser: "user-1",
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().ListByUser("user-1").Return(nil, nil)
+			},
+			wantCode:   http.StatusNoContent,
+			wantNoBody: true,
+		},
+		{
+			name:       "user with URLs returns JSON list",
+			sendCookie: true,
+			cookieUser: "user-1",
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().ListByUser("user-1").Return([]model.URL{
+					{Code: "abc123", Original: "https://one.example"},
+					{Code: "def456", Original: "https://two.example"},
+				}, nil)
+			},
+			wantCode: http.StatusOK,
+			wantResults: []map[string]string{
+				{"short_url": "http://localhost:8080/abc123", "original_url": "https://one.example"},
+				{"short_url": "http://localhost:8080/def456", "original_url": "https://two.example"},
+			},
+		},
+		{
+			name:       "service error returns 500",
+			sendCookie: true,
+			cookieUser: "user-1",
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().ListByUser("user-1").Return(nil, io.ErrUnexpectedEOF)
+			},
+			wantCode: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := mocks.NewShortener(t)
+			if tt.setup != nil {
+				tt.setup(svc)
+			}
+
+			req := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+			if tt.sendCookie {
+				c := auth.New("test-secret").Cookie(tt.cookieUser)
+				req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: c.Value})
+			}
+			w := httptest.NewRecorder()
+
+			newHandlerWithAuth(svc, auth.New("test-secret")).ServeHTTP(w, req)
+
+			res := w.Result()
+			defer res.Body.Close()
+
+			assert.Equal(t, tt.wantCode, res.StatusCode)
+
+			if tt.wantResults != nil {
+				var resp []map[string]string
+				err := json.NewDecoder(res.Body).Decode(&resp)
+				require.NoError(t, err)
+				assert.Equal(t, tt.wantResults, resp)
+			}
+
+			if tt.wantNoBody {
+				body, err := io.ReadAll(res.Body)
+				require.NoError(t, err)
+				assert.Empty(t, body)
+			}
+		})
+	}
+}
+
+func TestHandleUserURLs_SetsCookieOnFirstVisit(t *testing.T) {
+	svc := mocks.NewShortener(t)
+	svc.EXPECT().ListByUser(mock.AnythingOfType("string")).Return(nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+	w := httptest.NewRecorder()
+
+	newHandlerWithAuth(svc, auth.New("test-secret")).ServeHTTP(w, req)
+
+	res := w.Result()
+	defer res.Body.Close()
+
+	assert.Equal(t, http.StatusNoContent, res.StatusCode)
+	assert.Len(t, res.Cookies(), 1)
+	assert.Equal(t, auth.CookieName, res.Cookies()[0].Name)
+}
+
+// --- DELETE /api/user/urls ---
+
+func TestHandleDeleteUserURLs(t *testing.T) {
+	tests := []struct {
+		name       string
+		sendCookie bool
+		cookieUser string
+		body       string
+		setup      func(*mocks.Shortener)
+		wantCode   int
+	}{
+		{
+			name:       "valid request returns 202",
+			sendCookie: true,
+			cookieUser: "user-1",
+			body:       `["6qxTVvsy","RTfd56hn"]`,
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().Delete("user-1", []string{"6qxTVvsy", "RTfd56hn"}).Return(nil)
+			},
+			wantCode: http.StatusAccepted,
+		},
+		{
+			name:       "empty list returns 202",
+			sendCookie: true,
+			cookieUser: "user-1",
+			body:       `[]`,
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().Delete("user-1", []string{}).Return(nil)
+			},
+			wantCode: http.StatusAccepted,
+		},
+		{
+			name:       "cookie without user id returns 401",
+			sendCookie: true,
+			body:       `["6qxTVvsy"]`,
+			wantCode:   http.StatusUnauthorized,
+		},
+		{
+			name:       "invalid JSON returns 400",
+			sendCookie: true,
+			cookieUser: "user-1",
+			body:       `not json`,
+			wantCode:   http.StatusBadRequest,
+		},
+		{
+			name:       "service error returns 500",
+			sendCookie: true,
+			cookieUser: "user-1",
+			body:       `["6qxTVvsy"]`,
+			setup: func(m *mocks.Shortener) {
+				m.EXPECT().Delete("user-1", []string{"6qxTVvsy"}).Return(io.ErrUnexpectedEOF)
+			},
+			wantCode: http.StatusInternalServerError,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			svc := mocks.NewShortener(t)
+			if tt.setup != nil {
+				tt.setup(svc)
+			}
+
+			req := httptest.NewRequest(http.MethodDelete, "/api/user/urls", strings.NewReader(tt.body))
+			if tt.sendCookie {
+				c := auth.New("test-secret").Cookie(tt.cookieUser)
+				req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: c.Value})
+			}
+			w := httptest.NewRecorder()
+
+			newHandlerWithAuth(svc, auth.New("test-secret")).ServeHTTP(w, req)
+
+			assert.Equal(t, tt.wantCode, w.Code)
+		})
+	}
+}
+
+// --- GET /{id} deleted URL ---
+
+func TestHandleResolve_DeletedURLReturnsGone(t *testing.T) {
+	svc := mocks.NewShortener(t)
+	svc.EXPECT().Resolve("deleted1").Return("", repository.ErrGone)
+
+	req := httptest.NewRequest(http.MethodGet, "/deleted1", nil)
+	w := httptest.NewRecorder()
+
+	newHandler(svc).ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusGone, w.Code)
 }
