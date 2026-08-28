@@ -23,8 +23,8 @@ func NewPostgres(db *sql.DB) *PostgresRepository {
 
 func (repo *PostgresRepository) Write(ctx context.Context, url model.URL) error {
 	const query = `
-		INSERT INTO shortener_urls (code, original_url, created_at, updated_at)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO shortener_urls (code, original_url, user_id, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (original_url) DO NOTHING
 		RETURNING code
 	`
@@ -35,6 +35,7 @@ func (repo *PostgresRepository) Write(ctx context.Context, url model.URL) error 
 		query,
 		url.Code,
 		url.Original,
+		url.UserID,
 		url.CreatedAt,
 		url.UpdatedAt,
 	).Scan(&insertedCode)
@@ -62,14 +63,14 @@ func (repo *PostgresRepository) WriteBatch(ctx context.Context, urls []model.URL
 	}
 
 	valueStrings := make([]string, 0, len(urls))
-	valueArgs := make([]any, 0, len(urls)*4)
+	valueArgs := make([]any, 0, len(urls)*5)
 	for i, url := range urls {
-		valueStrings = append(valueStrings, fmt.Sprintf("($%d, $%d, $%d, $%d)", i*4+1, i*4+2, i*4+3, i*4+4))
-		valueArgs = append(valueArgs, url.Code, url.Original, url.CreatedAt, url.UpdatedAt)
+		valueStrings = append(valueStrings, fmt.Sprintf("($%d, $%d, $%d, $%d, $%d)", i*5+1, i*5+2, i*5+3, i*5+4, i*5+5))
+		valueArgs = append(valueArgs, url.Code, url.Original, url.UserID, url.CreatedAt, url.UpdatedAt)
 	}
 
 	query := fmt.Sprintf(
-		`INSERT INTO shortener_urls (code, original_url, created_at, updated_at)
+		`INSERT INTO shortener_urls (code, original_url, user_id, created_at, updated_at)
 		 VALUES %s
 		 ON CONFLICT (original_url) DO NOTHING
 		 RETURNING code`,
@@ -119,14 +120,14 @@ func (repo *PostgresRepository) WriteBatch(ctx context.Context, urls []model.URL
 
 func (repo *PostgresRepository) getByOriginal(ctx context.Context, original string) (model.URL, error) {
 	const query = `
-		SELECT code, original_url, created_at, updated_at
+		SELECT code, original_url, user_id, created_at, updated_at
 		FROM shortener_urls
 		WHERE original_url = $1
 	`
 
 	var url model.URL
 	err := repo.db.QueryRowContext(ctx, query, original).
-		Scan(&url.Code, &url.Original, &url.CreatedAt, &url.UpdatedAt)
+		Scan(&url.Code, &url.Original, &url.UserID, &url.CreatedAt, &url.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.URL{}, ErrNotFound
 	}
@@ -139,14 +140,14 @@ func (repo *PostgresRepository) getByOriginal(ctx context.Context, original stri
 
 func (repo *PostgresRepository) Get(ctx context.Context, code string) (model.URL, error) {
 	const query = `
-		SELECT code, original_url, created_at, updated_at
+		SELECT code, original_url, user_id, created_at, updated_at
 		FROM shortener_urls
 		WHERE code = $1
 	`
 
 	var url model.URL
 	err := repo.db.QueryRowContext(ctx, query, code).
-		Scan(&url.Code, &url.Original, &url.CreatedAt, &url.UpdatedAt)
+		Scan(&url.Code, &url.Original, &url.UserID, &url.CreatedAt, &url.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return model.URL{}, ErrNotFound
 	}
@@ -155,4 +156,36 @@ func (repo *PostgresRepository) Get(ctx context.Context, code string) (model.URL
 	}
 
 	return url, nil
+}
+
+func (repo *PostgresRepository) GetByUser(userID string) ([]model.URL, error) {
+	const query = `
+		SELECT code, original_url, user_id, created_at, updated_at
+		FROM shortener_urls
+		WHERE user_id = $1
+		ORDER BY created_at, id
+	`
+
+	ctx := context.Background()
+
+	rows, err := repo.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	urls := make([]model.URL, 0)
+	for rows.Next() {
+		var url model.URL
+		if err := rows.Scan(&url.Code, &url.Original, &url.UserID, &url.CreatedAt, &url.UpdatedAt); err != nil {
+			return nil, err
+		}
+		urls = append(urls, url)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return urls, nil
 }

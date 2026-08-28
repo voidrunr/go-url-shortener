@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"github.com/voidrunr/go-url-shortener/internal/auth"
 	"github.com/voidrunr/go-url-shortener/internal/config"
 	"github.com/voidrunr/go-url-shortener/internal/database"
 	"github.com/voidrunr/go-url-shortener/internal/database/migrations"
@@ -32,6 +33,8 @@ func main() {
 	svc := service.New(repo, cfg.BaseURL, cfg.CollisionRetries)
 
 	opts := []handler.Option{
+		handler.WithAuth(auth.New(cfg.SecretKey)),
+		handler.WithBaseURL(cfg.BaseURL),
 		handler.WithLogger(log.Logger),
 	}
 	if db != nil {

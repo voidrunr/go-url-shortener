@@ -77,9 +77,9 @@ func (_c *Shortener_Resolve_Call) RunAndReturn(run func(string) (string, error))
 	return _c
 }
 
-// Shorten provides a mock function with given fields: _a0
-func (_m *Shortener) Shorten(_a0 string) (string, error) {
-	ret := _m.Called(_a0)
+// Shorten provides a mock function with given fields: _a0, _a1
+func (_m *Shortener) Shorten(_a0 string, _a1 string) (string, error) {
+	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for Shorten")
@@ -87,17 +87,17 @@ func (_m *Shortener) Shorten(_a0 string) (string, error) {
 
 	var r0 string
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string) (string, error)); ok {
-		return rf(_a0)
+	if rf, ok := ret.Get(0).(func(string, string) (string, error)); ok {
+		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(string) string); ok {
-		r0 = rf(_a0)
+	if rf, ok := ret.Get(0).(func(string, string) string); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(_a0)
+	if rf, ok := ret.Get(1).(func(string, string) error); ok {
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -112,13 +112,14 @@ type Shortener_Shorten_Call struct {
 
 // Shorten is a helper method to define mock.On call
 //   - _a0 string
-func (_e *Shortener_Expecter) Shorten(_a0 interface{}) *Shortener_Shorten_Call {
-	return &Shortener_Shorten_Call{Call: _e.mock.On("Shorten", _a0)}
+//   - _a1 string
+func (_e *Shortener_Expecter) Shorten(_a0 interface{}, _a1 interface{}) *Shortener_Shorten_Call {
+	return &Shortener_Shorten_Call{Call: _e.mock.On("Shorten", _a0, _a1)}
 }
 
-func (_c *Shortener_Shorten_Call) Run(run func(_a0 string)) *Shortener_Shorten_Call {
+func (_c *Shortener_Shorten_Call) Run(run func(_a0 string, _a1 string)) *Shortener_Shorten_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(string), args[1].(string))
 	})
 	return _c
 }
@@ -128,14 +129,14 @@ func (_c *Shortener_Shorten_Call) Return(_a0 string, _a1 error) *Shortener_Short
 	return _c
 }
 
-func (_c *Shortener_Shorten_Call) RunAndReturn(run func(string) (string, error)) *Shortener_Shorten_Call {
+func (_c *Shortener_Shorten_Call) RunAndReturn(run func(string, string) (string, error)) *Shortener_Shorten_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// ShortenBatch provides a mock function with given fields: _a0
-func (_m *Shortener) ShortenBatch(_a0 []model.BatchItem) ([]model.BatchItem, error) {
-	ret := _m.Called(_a0)
+// ShortenBatch provides a mock function with given fields: _a0, _a1
+func (_m *Shortener) ShortenBatch(_a0 []model.BatchItem, _a1 string) ([]model.BatchItem, error) {
+	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ShortenBatch")
@@ -143,19 +144,19 @@ func (_m *Shortener) ShortenBatch(_a0 []model.BatchItem) ([]model.BatchItem, err
 
 	var r0 []model.BatchItem
 	var r1 error
-	if rf, ok := ret.Get(0).(func([]model.BatchItem) ([]model.BatchItem, error)); ok {
-		return rf(_a0)
+	if rf, ok := ret.Get(0).(func([]model.BatchItem, string) ([]model.BatchItem, error)); ok {
+		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func([]model.BatchItem) []model.BatchItem); ok {
-		r0 = rf(_a0)
+	if rf, ok := ret.Get(0).(func([]model.BatchItem, string) []model.BatchItem); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]model.BatchItem)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func([]model.BatchItem) error); ok {
-		r1 = rf(_a0)
+	if rf, ok := ret.Get(1).(func([]model.BatchItem, string) error); ok {
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -170,13 +171,14 @@ type Shortener_ShortenBatch_Call struct {
 
 // ShortenBatch is a helper method to define mock.On call
 //   - _a0 []model.BatchItem
-func (_e *Shortener_Expecter) ShortenBatch(_a0 interface{}) *Shortener_ShortenBatch_Call {
-	return &Shortener_ShortenBatch_Call{Call: _e.mock.On("ShortenBatch", _a0)}
+//   - _a1 string
+func (_e *Shortener_Expecter) ShortenBatch(_a0 interface{}, _a1 interface{}) *Shortener_ShortenBatch_Call {
+	return &Shortener_ShortenBatch_Call{Call: _e.mock.On("ShortenBatch", _a0, _a1)}
 }
 
-func (_c *Shortener_ShortenBatch_Call) Run(run func(_a0 []model.BatchItem)) *Shortener_ShortenBatch_Call {
+func (_c *Shortener_ShortenBatch_Call) Run(run func(_a0 []model.BatchItem, _a1 string)) *Shortener_ShortenBatch_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]model.BatchItem))
+		run(args[0].([]model.BatchItem), args[1].(string))
 	})
 	return _c
 }
@@ -186,7 +188,65 @@ func (_c *Shortener_ShortenBatch_Call) Return(_a0 []model.BatchItem, _a1 error) 
 	return _c
 }
 
-func (_c *Shortener_ShortenBatch_Call) RunAndReturn(run func([]model.BatchItem) ([]model.BatchItem, error)) *Shortener_ShortenBatch_Call {
+func (_c *Shortener_ShortenBatch_Call) RunAndReturn(run func([]model.BatchItem, string) ([]model.BatchItem, error)) *Shortener_ShortenBatch_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListByUser provides a mock function with given fields: _a0
+func (_m *Shortener) ListByUser(_a0 string) ([]model.URL, error) {
+	ret := _m.Called(_a0)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListByUser")
+	}
+
+	var r0 []model.URL
+	var r1 error
+	if rf, ok := ret.Get(0).(func(string) ([]model.URL, error)); ok {
+		return rf(_a0)
+	}
+	if rf, ok := ret.Get(0).(func(string) []model.URL); ok {
+		r0 = rf(_a0)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]model.URL)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(string) error); ok {
+		r1 = rf(_a0)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// Shortener_ListByUser_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListByUser'
+type Shortener_ListByUser_Call struct {
+	*mock.Call
+}
+
+// ListByUser is a helper method to define mock.On call
+//   - _a0 string
+func (_e *Shortener_Expecter) ListByUser(_a0 interface{}) *Shortener_ListByUser_Call {
+	return &Shortener_ListByUser_Call{Call: _e.mock.On("ListByUser", _a0)}
+}
+
+func (_c *Shortener_ListByUser_Call) Run(run func(_a0 string)) *Shortener_ListByUser_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string))
+	})
+	return _c
+}
+
+func (_c *Shortener_ListByUser_Call) Return(_a0 []model.URL, _a1 error) *Shortener_ListByUser_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *Shortener_ListByUser_Call) RunAndReturn(run func(string) ([]model.URL, error)) *Shortener_ListByUser_Call {
 	_c.Call.Return(run)
 	return _c
 }

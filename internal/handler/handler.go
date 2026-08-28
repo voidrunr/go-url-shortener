@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -13,15 +14,17 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/voidrunr/go-url-shortener/internal/auth"
 	"github.com/voidrunr/go-url-shortener/internal/middleware"
 	"github.com/voidrunr/go-url-shortener/internal/model"
 	"github.com/voidrunr/go-url-shortener/internal/repository"
 )
 
 type Shortener interface {
-	Shorten(string) (string, error)
-	ShortenBatch([]model.BatchItem) ([]model.BatchItem, error)
+	Shorten(string, string) (string, error)
+	ShortenBatch([]model.BatchItem, string) ([]model.BatchItem, error)
 	Resolve(string) (string, error)
+	ListByUser(string) ([]model.URL, error)
 }
 
 type Pinger interface {
@@ -36,6 +39,18 @@ func WithPinger(p Pinger) Option {
 	}
 }
 
+func WithAuth(a *auth.Auth) Option {
+	return func(hlr *URLHandler) {
+		hlr.auth = a
+	}
+}
+
+func WithBaseURL(baseURL string) Option {
+	return func(hlr *URLHandler) {
+		hlr.baseURL = baseURL
+	}
+}
+
 func WithLogger(l zerolog.Logger) Option {
 	return func(hlr *URLHandler) {
 		hlr.logger = l
@@ -43,9 +58,11 @@ func WithLogger(l zerolog.Logger) Option {
 }
 
 type URLHandler struct {
-	svc    Shortener
-	pinger Pinger
-	logger zerolog.Logger
+	svc     Shortener
+	pinger  Pinger
+	auth    *auth.Auth
+	baseURL string
+	logger  zerolog.Logger
 }
 
 func New(svc Shortener, opts ...Option) *URLHandler {
@@ -63,9 +80,13 @@ func (hlr *URLHandler) Router() http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Logging)
 	r.Use(middleware.Gzip)
+	if hlr.auth != nil {
+		r.Use(hlr.auth.Handler)
+	}
 	r.Post("/", hlr.handleShorten)
 	r.Post("/api/shorten", hlr.handleAPIShorten)
 	r.Post("/api/shorten/batch", hlr.handleAPIShortenBatch)
+	r.Get("/api/user/urls", hlr.handleUserURLs)
 	r.Get("/", hlr.handleEmptyCode)
 	r.Get("/ping", hlr.handlePing)
 	r.Get("/{code}", hlr.handleResolve)
@@ -102,7 +123,8 @@ func (hlr *URLHandler) handleShorten(w http.ResponseWriter, r *http.Request) {
 	}
 
 	originalURL := strings.TrimSpace(string(body))
-	shortURL, err := hlr.svc.Shorten(originalURL)
+	userID := auth.UserIDFromContext(r.Context())
+	shortURL, err := hlr.svc.Shorten(originalURL, userID)
 	if err != nil {
 		if errors.Is(err, repository.ErrURLAlreadyExists) {
 			w.Header().Set("Content-Type", "text/plain")
@@ -145,7 +167,8 @@ func (hlr *URLHandler) handleAPIShorten(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	shortURL, err := hlr.svc.Shorten(req.URL)
+	userID := auth.UserIDFromContext(r.Context())
+	shortURL, err := hlr.svc.Shorten(req.URL, userID)
 	if err != nil {
 		if errors.Is(err, repository.ErrURLAlreadyExists) {
 			resp := shortenResponse{Result: shortURL}
@@ -193,7 +216,8 @@ func (hlr *URLHandler) handleAPIShortenBatch(w http.ResponseWriter, r *http.Requ
 		})
 	}
 
-	results, err := hlr.svc.ShortenBatch(items)
+	userID := auth.UserIDFromContext(r.Context())
+	results, err := hlr.svc.ShortenBatch(items, userID)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
@@ -227,4 +251,47 @@ func (hlr *URLHandler) handleResolve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, originalURL, http.StatusTemporaryRedirect)
+}
+
+type userURLResponse struct {
+	ShortURL    string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
+}
+
+func (hlr *URLHandler) handleUserURLs(w http.ResponseWriter, r *http.Request) {
+	if auth.HasNoUserID(r.Context()) {
+		w.WriteHeader(http.StatusUnauthorized)
+		return
+	}
+
+	userID := auth.UserIDFromContext(r.Context())
+	urls, err := hlr.svc.ListByUser(userID)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	if len(urls) == 0 {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	resp := make([]userURLResponse, 0, len(urls))
+	for _, u := range urls {
+		shortURL, err := url.JoinPath(hlr.baseURL, u.Code)
+		if err != nil {
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		resp = append(resp, userURLResponse{
+			ShortURL:    shortURL,
+			OriginalURL: u.Original,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		log.Error().Err(err).Msg("failed to encode response")
+	}
 }

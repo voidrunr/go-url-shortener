@@ -11,7 +11,7 @@ import (
 )
 
 type FileRepository struct {
-	mutex    sync.Mutex
+	mutex    sync.RWMutex
 	store    map[string]model.URL
 	filePath string
 }
@@ -78,6 +78,20 @@ func (repo *FileRepository) Get(ctx context.Context, code string) (model.URL, er
 	}
 
 	return url, nil
+}
+
+func (repo *FileRepository) GetByUser(userID string) ([]model.URL, error) {
+	repo.mutex.RLock()
+	defer repo.mutex.RUnlock()
+
+	urls := make([]model.URL, 0)
+	for _, url := range repo.store {
+		if url.UserID == userID {
+			urls = append(urls, url)
+		}
+	}
+
+	return urls, nil
 }
 
 func (repo *FileRepository) findByOriginal(original string) (model.URL, bool) {

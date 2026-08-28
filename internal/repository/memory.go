@@ -8,7 +8,7 @@ import (
 )
 
 type MemoryRepository struct {
-	mutex sync.Mutex
+	mutex sync.RWMutex
 	store map[string]model.URL
 }
 
@@ -61,6 +61,20 @@ func (repo *MemoryRepository) Get(ctx context.Context, code string) (model.URL, 
 	}
 
 	return url, nil
+}
+
+func (repo *MemoryRepository) GetByUser(userID string) ([]model.URL, error) {
+	repo.mutex.RLock()
+	defer repo.mutex.RUnlock()
+
+	urls := make([]model.URL, 0)
+	for _, url := range repo.store {
+		if url.UserID == userID {
+			urls = append(urls, url)
+		}
+	}
+
+	return urls, nil
 }
 
 func (repo *MemoryRepository) findByOriginal(original string) (model.URL, bool) {

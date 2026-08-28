@@ -18,6 +18,7 @@ type Repository interface {
 	Write(ctx context.Context, url model.URL) error
 	WriteBatch(ctx context.Context, urls []model.URL) error
 	Get(ctx context.Context, code string) (model.URL, error)
+	GetByUser(string) ([]model.URL, error)
 }
 
 type URLService struct {
@@ -56,7 +57,7 @@ func generateUUID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func (srv URLService) Shorten(originalURL string) (string, error) {
+func (srv URLService) Shorten(originalURL string, userID string) (string, error) {
 	unlimited := srv.collisionRetries <= 0
 
 	for i := 0; unlimited || i < srv.collisionRetries; i++ {
@@ -76,12 +77,14 @@ func (srv URLService) Shorten(originalURL string) (string, error) {
 			UUID:      uuid,
 			Original:  originalURL,
 			Code:      code,
+			UserID:    userID,
 			CreatedAt: now,
 			UpdatedAt: now,
 		}
 
 		if err := srv.repo.Write(context.TODO(), u); err != nil {
-			if dupErr, ok := errors.AsType[*repository.DuplicateURLError](err); ok {
+			var dupErr *repository.DuplicateURLError
+			if errors.As(err, &dupErr) {
 				shortURL, joinErr := url.JoinPath(srv.baseURL, dupErr.URL.Code)
 				if joinErr != nil {
 					return "", joinErr
@@ -100,7 +103,7 @@ func (srv URLService) Shorten(originalURL string) (string, error) {
 	return "", fmt.Errorf("failed to generate unique code after %d attempts", srv.collisionRetries)
 }
 
-func (srv URLService) ShortenBatch(items []model.BatchItem) ([]model.BatchItem, error) {
+func (srv URLService) ShortenBatch(items []model.BatchItem, userID string) ([]model.BatchItem, error) {
 	unlimited := srv.collisionRetries <= 0
 
 	for i := 0; unlimited || i < srv.collisionRetries; i++ {
@@ -124,6 +127,7 @@ func (srv URLService) ShortenBatch(items []model.BatchItem) ([]model.BatchItem, 
 				UUID:      uuid,
 				Original:  item.OriginalURL,
 				Code:      code,
+				UserID:    userID,
 				CreatedAt: now,
 				UpdatedAt: now,
 			})
@@ -162,4 +166,8 @@ func (srv URLService) Resolve(code string) (string, error) {
 	}
 
 	return url.Original, err
+}
+
+func (srv URLService) ListByUser(userID string) ([]model.URL, error) {
+	return srv.repo.GetByUser(userID)
 }
