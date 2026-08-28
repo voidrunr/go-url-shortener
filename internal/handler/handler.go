@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/voidrunr/go-url-shortener/internal/auth"
 	"github.com/voidrunr/go-url-shortener/internal/middleware"
@@ -51,16 +52,24 @@ func WithBaseURL(baseURL string) Option {
 	}
 }
 
+func WithLogger(l zerolog.Logger) Option {
+	return func(hlr *URLHandler) {
+		hlr.logger = l
+	}
+}
+
 type URLHandler struct {
 	svc     Shortener
 	pinger  Pinger
 	auth    *auth.Auth
 	baseURL string
+	logger  zerolog.Logger
 }
 
 func New(svc Shortener, opts ...Option) *URLHandler {
 	hlr := &URLHandler{
-		svc: svc,
+		svc:    svc,
+		logger: log.Logger,
 	}
 	for _, opt := range opts {
 		opt(hlr)
@@ -96,7 +105,7 @@ func (hlr *URLHandler) handlePing(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if err := hlr.pinger.PingContext(ctx); err != nil {
-		log.Error().Err(err).Msg("database ping failed")
+		hlr.logger.Error().Err(err).Msg("database ping failed")
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
@@ -168,7 +177,7 @@ func (hlr *URLHandler) handleAPIShorten(w http.ResponseWriter, r *http.Request) 
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusConflict)
 			if err := json.NewEncoder(w).Encode(resp); err != nil {
-				log.Error().Err(err).Msg("failed to encode response")
+				hlr.logger.Error().Err(err).Msg("failed to encode response")
 			}
 			return
 		}
@@ -180,7 +189,7 @@ func (hlr *URLHandler) handleAPIShorten(w http.ResponseWriter, r *http.Request) 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Error().Err(err).Msg("failed to encode response")
+		hlr.logger.Error().Err(err).Msg("failed to encode response")
 	}
 }
 
@@ -227,7 +236,7 @@ func (hlr *URLHandler) handleAPIShortenBatch(w http.ResponseWriter, r *http.Requ
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Error().Err(err).Msg("failed to encode response")
+		hlr.logger.Error().Err(err).Msg("failed to encode response")
 	}
 }
 

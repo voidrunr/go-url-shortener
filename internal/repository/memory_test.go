@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -15,24 +16,24 @@ func TestMemoryRepository(t *testing.T) {
 	url := testURL("abc123", "https://example.com")
 
 	t.Run("write and get", func(t *testing.T) {
-		require.NoError(t, repo.Write(url))
+		require.NoError(t, repo.Write(context.Background(), url))
 
-		got, err := repo.Get("abc123")
+		got, err := repo.Get(context.Background(), "abc123")
 		require.NoError(t, err)
 		assert.Equal(t, url.Original, got.Original)
 		assert.Equal(t, url.Code, got.Code)
 	})
 
 	t.Run("duplicate code returns ErrConflict", func(t *testing.T) {
-		err := repo.Write(testURL("abc123", "https://other.com"))
+		err := repo.Write(context.Background(), testURL("abc123", "https://other.com"))
 		assert.ErrorIs(t, err, ErrConflict)
 	})
 
 	t.Run("duplicate original returns DuplicateURLError", func(t *testing.T) {
 		repo := NewMemory()
-		require.NoError(t, repo.Write(testURL("abc123", "https://example.com")))
+		require.NoError(t, repo.Write(context.Background(), testURL("abc123", "https://example.com")))
 
-		err := repo.Write(testURL("xyz789", "https://example.com"))
+		err := repo.Write(context.Background(), testURL("xyz789", "https://example.com"))
 		var dupErr *DuplicateURLError
 		require.ErrorAs(t, err, &dupErr)
 		assert.ErrorIs(t, err, ErrURLAlreadyExists)
@@ -44,33 +45,33 @@ func TestMemoryRepository(t *testing.T) {
 		u1 := testURL("b1", "https://one.example")
 		u2 := testURL("b2", "https://two.example")
 
-		require.NoError(t, repo.WriteBatch([]model.URL{u1, u2}))
+		require.NoError(t, repo.WriteBatch(context.Background(), []model.URL{u1, u2}))
 
-		got1, err := repo.Get("b1")
+		got1, err := repo.Get(context.Background(), "b1")
 		require.NoError(t, err)
 		assert.Equal(t, u1.Original, got1.Original)
 
-		got2, err := repo.Get("b2")
+		got2, err := repo.Get(context.Background(), "b2")
 		require.NoError(t, err)
 		assert.Equal(t, u2.Original, got2.Original)
 	})
 
 	t.Run("batch write conflict writes nothing", func(t *testing.T) {
 		repo := NewMemory()
-		require.NoError(t, repo.Write(testURL("b1", "https://one.example")))
+		require.NoError(t, repo.Write(context.Background(), testURL("b1", "https://one.example")))
 
-		err := repo.WriteBatch([]model.URL{
+		err := repo.WriteBatch(context.Background(), []model.URL{
 			testURL("b2", "https://two.example"),
 			testURL("b1", "https://conflict.example"),
 		})
 		assert.ErrorIs(t, err, ErrConflict)
 
-		_, err = repo.Get("b2")
+		_, err = repo.Get(context.Background(), "b2")
 		assert.ErrorIs(t, err, ErrNotFound)
 	})
 
 	t.Run("unknown code returns ErrNotFound", func(t *testing.T) {
-		_, err := repo.Get("missing")
+		_, err := repo.Get(context.Background(), "missing")
 		assert.ErrorIs(t, err, ErrNotFound)
 	})
 
@@ -83,9 +84,9 @@ func TestMemoryRepository(t *testing.T) {
 		u3 := testURL("d3", "https://three.example")
 		u3.UserID = "user-b"
 
-		require.NoError(t, repo.Write(u1))
-		require.NoError(t, repo.Write(u2))
-		require.NoError(t, repo.Write(u3))
+		require.NoError(t, repo.Write(context.Background(), u1))
+		require.NoError(t, repo.Write(context.Background(), u2))
+		require.NoError(t, repo.Write(context.Background(), u3))
 
 		got, err := repo.GetByUser("user-a")
 		require.NoError(t, err)
@@ -109,14 +110,14 @@ func TestMemoryRepository(t *testing.T) {
 		u1 := testURL("c1", "https://one.example")
 		u2 := testURL("c2", "https://two.example")
 
-		require.NoError(t, repo.Write(u1))
-		require.NoError(t, repo.Write(u2))
+		require.NoError(t, repo.Write(context.Background(), u1))
+		require.NoError(t, repo.Write(context.Background(), u2))
 
-		got1, err := repo.Get("c1")
+		got1, err := repo.Get(context.Background(), "c1")
 		require.NoError(t, err)
 		assert.Equal(t, u1.Original, got1.Original)
 
-		got2, err := repo.Get("c2")
+		got2, err := repo.Get(context.Background(), "c2")
 		require.NoError(t, err)
 		assert.Equal(t, u2.Original, got2.Original)
 	})
@@ -130,21 +131,21 @@ func TestMemoryRepository(t *testing.T) {
 		u3 := testURL("e3", "https://three.delete.example")
 		u3.UserID = "user-b"
 
-		require.NoError(t, repo.Write(u1))
-		require.NoError(t, repo.Write(u2))
-		require.NoError(t, repo.Write(u3))
+		require.NoError(t, repo.Write(context.Background(), u1))
+		require.NoError(t, repo.Write(context.Background(), u2))
+		require.NoError(t, repo.Write(context.Background(), u3))
 
 		require.NoError(t, repo.DeleteBatch("user-a", []string{"e1", "e2", "missing"}))
 
-		got1, err := repo.Get("e1")
+		got1, err := repo.Get(context.Background(), "e1")
 		require.NoError(t, err)
 		assert.True(t, got1.Deleted)
 
-		got2, err := repo.Get("e2")
+		got2, err := repo.Get(context.Background(), "e2")
 		require.NoError(t, err)
 		assert.True(t, got2.Deleted)
 
-		got3, err := repo.Get("e3")
+		got3, err := repo.Get(context.Background(), "e3")
 		require.NoError(t, err)
 		assert.False(t, got3.Deleted)
 	})
@@ -153,6 +154,6 @@ func TestMemoryRepository(t *testing.T) {
 func TestMemoryRepository_Empty(t *testing.T) {
 	repo := NewMemory()
 
-	_, err := repo.Get("anything")
+	_, err := repo.Get(context.Background(), "anything")
 	assert.ErrorIs(t, err, ErrNotFound)
 }

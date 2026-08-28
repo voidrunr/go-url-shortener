@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"errors"
 
 	"github.com/voidrunr/go-url-shortener/internal/model"
@@ -21,14 +22,14 @@ func (e *DuplicateURLError) Error() string {
 	return ErrURLAlreadyExists.Error()
 }
 
-func (e *DuplicateURLError) Is(target error) bool {
-	return target == ErrURLAlreadyExists
+func (e *DuplicateURLError) Unwrap() error {
+	return ErrURLAlreadyExists
 }
 
 type Repository interface {
-	Write(model.URL) error
-	WriteBatch([]model.URL) error
-	Get(string) (model.URL, error)
+	Write(ctx context.Context, url model.URL) error
+	WriteBatch(ctx context.Context, urls []model.URL) error
+	Get(ctx context.Context, code string) (model.URL, error)
 	GetByUser(string) ([]model.URL, error)
 	DeleteBatch(userID string, codes []string) error
 }

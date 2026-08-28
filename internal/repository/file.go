@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -64,7 +65,7 @@ func NewFile(filePath string) (*FileRepository, error) {
 	return repo, nil
 }
 
-func (repo *FileRepository) Write(url model.URL) error {
+func (repo *FileRepository) Write(ctx context.Context, url model.URL) error {
 	repo.mutex.Lock()
 	defer repo.mutex.Unlock()
 
@@ -80,7 +81,7 @@ func (repo *FileRepository) Write(url model.URL) error {
 	return repo.saveToFile()
 }
 
-func (repo *FileRepository) WriteBatch(urls []model.URL) error {
+func (repo *FileRepository) WriteBatch(ctx context.Context, urls []model.URL) error {
 	repo.mutex.Lock()
 	defer repo.mutex.Unlock()
 
@@ -96,7 +97,7 @@ func (repo *FileRepository) WriteBatch(urls []model.URL) error {
 	return repo.saveToFile()
 }
 
-func (repo *FileRepository) Delete(url model.URL) error {
+func (repo *FileRepository) Delete(ctx context.Context, url model.URL) error {
 	repo.mutex.Lock()
 	defer repo.mutex.Unlock()
 
@@ -104,9 +105,9 @@ func (repo *FileRepository) Delete(url model.URL) error {
 	return repo.saveToFile()
 }
 
-func (repo *FileRepository) Get(code string) (model.URL, error) {
-	repo.mutex.RLock()
-	defer repo.mutex.RUnlock()
+func (repo *FileRepository) Get(ctx context.Context, code string) (model.URL, error) {
+	repo.mutex.Lock()
+	defer repo.mutex.Unlock()
 
 	url, ok := repo.store[code]
 

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"sync"
 
 	"github.com/voidrunr/go-url-shortener/internal/model"
@@ -17,7 +18,7 @@ func NewMemory() *MemoryRepository {
 	}
 }
 
-func (repo *MemoryRepository) Write(url model.URL) error {
+func (repo *MemoryRepository) Write(ctx context.Context, url model.URL) error {
 	repo.mutex.Lock()
 	defer repo.mutex.Unlock()
 
@@ -33,7 +34,7 @@ func (repo *MemoryRepository) Write(url model.URL) error {
 	return nil
 }
 
-func (repo *MemoryRepository) WriteBatch(urls []model.URL) error {
+func (repo *MemoryRepository) WriteBatch(ctx context.Context, urls []model.URL) error {
 	repo.mutex.Lock()
 	defer repo.mutex.Unlock()
 
@@ -49,9 +50,9 @@ func (repo *MemoryRepository) WriteBatch(urls []model.URL) error {
 	return nil
 }
 
-func (repo *MemoryRepository) Get(code string) (model.URL, error) {
-	repo.mutex.RLock()
-	defer repo.mutex.RUnlock()
+func (repo *MemoryRepository) Get(ctx context.Context, code string) (model.URL, error) {
+	repo.mutex.Lock()
+	defer repo.mutex.Unlock()
 
 	url, ok := repo.store[code]
 
