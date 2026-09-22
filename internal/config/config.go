@@ -25,7 +25,7 @@ func Parse() (Config, error) {
 	flag.IntVar(&cfg.CollisionRetries, "m", 5, "max code generation attempts (0 or -1 for unlimited)")
 	flag.StringVar(&cfg.FileStoragePath, "f", "", "file path for URL storage")
 	flag.StringVar(&cfg.DatabaseDSN, "d", "", "database DSN")
-	flag.StringVar(&cfg.SecretKey, "secret-key", "", "secret key for signing auth cookies")
+	flag.StringVar(&cfg.SecretKey, "secret-key", "ChangeThisStringImportant", "secret key for signing auth cookies")
 	flag.DurationVar(&cfg.TokenTTL, "token-ttl", 24*time.Hour, "auth token lifetime")
 	flag.Parse()
 
