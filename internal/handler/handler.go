@@ -24,7 +24,7 @@ type Shortener interface {
 	Shorten(string, string) (string, error)
 	ShortenBatch([]model.BatchItem, string) ([]model.BatchItem, error)
 	Resolve(string) (string, error)
-	ListByUser(string) ([]model.URL, error)
+	ListByUser(ctx context.Context, userID string) ([]model.URL, error)
 	Delete(string, []string) error
 }
 
@@ -40,9 +40,9 @@ func WithPinger(p Pinger) Option {
 	}
 }
 
-func WithAuth(a *auth.Auth) Option {
+func WithAuth(s *auth.Signer) Option {
 	return func(hlr *URLHandler) {
-		hlr.auth = a
+		hlr.auth = s
 	}
 }
 
@@ -61,7 +61,7 @@ func WithLogger(l zerolog.Logger) Option {
 type URLHandler struct {
 	svc     Shortener
 	pinger  Pinger
-	auth    *auth.Auth
+	auth    *auth.Signer
 	baseURL string
 	logger  zerolog.Logger
 }
@@ -293,7 +293,7 @@ func (hlr *URLHandler) handleUserURLs(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := auth.UserIDFromContext(r.Context())
-	urls, err := hlr.svc.ListByUser(userID)
+	urls, err := hlr.svc.ListByUser(r.Context(), userID)
 	if err != nil {
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
@@ -320,6 +320,6 @@ func (hlr *URLHandler) handleUserURLs(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		log.Error().Err(err).Msg("failed to encode response")
+		hlr.logger.Error().Err(err).Msg("failed to encode response")
 	}
 }

@@ -51,8 +51,8 @@ func (repo *MemoryRepository) WriteBatch(ctx context.Context, urls []model.URL) 
 }
 
 func (repo *MemoryRepository) Get(ctx context.Context, code string) (model.URL, error) {
-	repo.mutex.Lock()
-	defer repo.mutex.Unlock()
+	repo.mutex.RLock()
+	defer repo.mutex.RUnlock()
 
 	url, ok := repo.store[code]
 
@@ -63,7 +63,7 @@ func (repo *MemoryRepository) Get(ctx context.Context, code string) (model.URL, 
 	return url, nil
 }
 
-func (repo *MemoryRepository) GetByUser(userID string) ([]model.URL, error) {
+func (repo *MemoryRepository) GetByUser(ctx context.Context, userID string) ([]model.URL, error) {
 	repo.mutex.RLock()
 	defer repo.mutex.RUnlock()
 
@@ -77,7 +77,7 @@ func (repo *MemoryRepository) GetByUser(userID string) ([]model.URL, error) {
 	return urls, nil
 }
 
-func (repo *MemoryRepository) DeleteBatch(userID string, codes []string) error {
+func (repo *MemoryRepository) DeleteBatch(ctx context.Context, userID string, codes []string) error {
 	repo.mutex.Lock()
 	defer repo.mutex.Unlock()
 

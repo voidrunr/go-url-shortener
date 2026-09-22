@@ -30,6 +30,6 @@ type Repository interface {
 	Write(ctx context.Context, url model.URL) error
 	WriteBatch(ctx context.Context, urls []model.URL) error
 	Get(ctx context.Context, code string) (model.URL, error)
-	GetByUser(string) ([]model.URL, error)
-	DeleteBatch(userID string, codes []string) error
+	GetByUser(ctx context.Context, userID string) ([]model.URL, error)
+	DeleteBatch(ctx context.Context, userID string, codes []string) error
 }

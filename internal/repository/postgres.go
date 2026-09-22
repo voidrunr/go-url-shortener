@@ -158,15 +158,13 @@ func (repo *PostgresRepository) Get(ctx context.Context, code string) (model.URL
 	return url, nil
 }
 
-func (repo *PostgresRepository) GetByUser(userID string) ([]model.URL, error) {
+func (repo *PostgresRepository) GetByUser(ctx context.Context, userID string) ([]model.URL, error) {
 	const query = `
 		SELECT code, original_url, user_id, is_deleted, created_at, updated_at
 		FROM shortener_urls
 		WHERE user_id = $1
 		ORDER BY created_at, id
 	`
-
-	ctx := context.Background()
 
 	rows, err := repo.db.QueryContext(ctx, query, userID)
 	if err != nil {
@@ -190,7 +188,7 @@ func (repo *PostgresRepository) GetByUser(userID string) ([]model.URL, error) {
 	return urls, nil
 }
 
-func (repo *PostgresRepository) DeleteBatch(userID string, codes []string) error {
+func (repo *PostgresRepository) DeleteBatch(ctx context.Context, userID string, codes []string) error {
 	if len(codes) == 0 {
 		return nil
 	}
@@ -201,6 +199,6 @@ func (repo *PostgresRepository) DeleteBatch(userID string, codes []string) error
 		WHERE user_id = $1 AND code = ANY($2)
 	`
 
-	_, err := repo.db.ExecContext(context.Background(), query, userID, codes)
+	_, err := repo.db.ExecContext(ctx, query, userID, codes)
 	return err
 }

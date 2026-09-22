@@ -2,21 +2,22 @@ package auth
 
 import (
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"net/http"
-	"strings"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 const CookieName = "token"
 
 var (
-	ErrNoCookie = errors.New("no cookie")
-	ErrInvalid  = errors.New("invalid cookie")
+	ErrNoCookie    = errors.New("no cookie")
+	ErrInvalid     = errors.New("invalid cookie")
+	ErrEmptySecret = errors.New("auth secret must not be empty")
+	ErrInvalidTTL  = errors.New("auth token ttl must be positive")
 )
 
 type contextKey string
@@ -26,36 +27,53 @@ const (
 	noUserIDKey contextKey = "noUserID"
 )
 
-// State describes how a request user was resolved.
 type State int
 
 const (
-	// StateNew means the request had no valid cookie, a fresh user was created
-	// and a new cookie must be set in the response.
 	StateNew State = iota
-	// StateUnauthorized means the request carried a cookie that failed
-	// authentication (e.g. it did not contain a user ID).
 	StateUnauthorized
-	// StateOK means the request carried a valid cookie with a user ID.
 	StateOK
 )
 
-type Auth struct {
+type tokenClaims struct {
+	jwt.RegisteredClaims
+}
+
+type Signer struct {
+	secret   []byte
+	verifier *Verifier
+	ttl      time.Duration
+}
+
+func NewSigner(secret string, ttl time.Duration) (*Signer, error) {
+	return newSigner([]byte(secret), ttl)
+}
+
+type Verifier struct {
 	secret []byte
 }
 
-// New creates an Auth signer. An empty secret results in a random per-process
-// key.
-func New(secret string) *Auth {
-	key := []byte(secret)
-	if len(key) == 0 {
-		key = make([]byte, 32)
-		_, _ = rand.Read(key)
+func NewVerifier(secret string) (*Verifier, error) {
+	if secret == "" {
+		return nil, ErrEmptySecret
 	}
-	return &Auth{secret: key}
+	return &Verifier{secret: []byte(secret)}, nil
 }
 
-// NewUserID generates a new unique user identifier.
+func newSigner(key []byte, ttl time.Duration) (*Signer, error) {
+	if len(key) == 0 {
+		return nil, ErrEmptySecret
+	}
+	if ttl <= 0 {
+		return nil, ErrInvalidTTL
+	}
+	return &Signer{secret: key, verifier: newVerifier(key), ttl: ttl}, nil
+}
+
+func newVerifier(key []byte) *Verifier {
+	return &Verifier{secret: key}
+}
+
 func NewUserID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -64,26 +82,29 @@ func NewUserID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// Cookie builds a signed cookie carrying the given user ID.
-func (a *Auth) Cookie(userID string) *http.Cookie {
+func (s *Signer) Cookie(userID string) (*http.Cookie, error) {
+	value, err := s.sign(userID)
+	if err != nil {
+		return nil, err
+	}
 	return &http.Cookie{
 		Name:     CookieName,
-		Value:    a.sign(userID),
+		Value:    value,
 		Path:     "/",
 		HttpOnly: true,
-	}
+	}, nil
 }
 
-// Handler resolves the request user, sets a new signed cookie when needed and
-// stores the result in the request context.
-func (a *Auth) Handler(next http.Handler) http.Handler {
+func (s *Signer) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userID, state := a.Resolve(r)
+		userID, state := s.verifier.Resolve(r)
 
 		ctx := r.Context()
 		switch state {
 		case StateNew:
-			http.SetCookie(w, a.Cookie(userID))
+			if cookie, err := s.Cookie(userID); err == nil {
+				http.SetCookie(w, cookie)
+			}
 			ctx = context.WithValue(ctx, userIDKey, userID)
 		case StateUnauthorized:
 			ctx = context.WithValue(ctx, noUserIDKey, true)
@@ -96,8 +117,7 @@ func (a *Auth) Handler(next http.Handler) http.Handler {
 	})
 }
 
-// Resolve returns the user ID for the request and the resolution state.
-func (a *Auth) Resolve(r *http.Request) (string, State) {
+func (v *Verifier) Resolve(r *http.Request) (string, State) {
 	c, err := r.Cookie(CookieName)
 	if errors.Is(err, http.ErrNoCookie) {
 		id, err := NewUserID()
@@ -107,7 +127,7 @@ func (a *Auth) Resolve(r *http.Request) (string, State) {
 		return id, StateNew
 	}
 
-	id, err := a.verify(c.Value)
+	id, err := v.verify(c.Value)
 	if err != nil {
 		id, genErr := NewUserID()
 		if genErr != nil {
@@ -122,46 +142,45 @@ func (a *Auth) Resolve(r *http.Request) (string, State) {
 	return id, StateOK
 }
 
-// UserIDFromContext returns the user ID stored by the auth handler, if any.
 func UserIDFromContext(ctx context.Context) string {
 	id, _ := ctx.Value(userIDKey).(string)
 	return id
 }
 
-// HasNoUserID reports whether the request carried a cookie that did not
-// contain a user ID.
 func HasNoUserID(ctx context.Context) bool {
 	v, _ := ctx.Value(noUserIDKey).(bool)
 	return v
 }
 
-func (a *Auth) sign(userID string) string {
-	payload := base64.RawURLEncoding.EncodeToString([]byte(userID))
-
-	mac := hmac.New(sha256.New, a.secret)
-	mac.Write([]byte(payload))
-	sig := hex.EncodeToString(mac.Sum(nil))
-
-	return payload + "." + sig
+func (s *Signer) sign(userID string) (string, error) {
+	now := time.Now()
+	claims := tokenClaims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   userID,
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(s.ttl)),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(s.secret)
 }
 
-func (a *Auth) verify(value string) (string, error) {
-	payload, sig, ok := strings.Cut(value, ".")
-	if !ok {
-		return "", ErrInvalid
-	}
-
-	mac := hmac.New(sha256.New, a.secret)
-	mac.Write([]byte(payload))
-	expected := hex.EncodeToString(mac.Sum(nil))
-	if !hmac.Equal([]byte(sig), []byte(expected)) {
-		return "", ErrInvalid
-	}
-
-	data, err := base64.RawURLEncoding.DecodeString(payload)
+func (v *Verifier) verify(value string) (string, error) {
+	claims := &tokenClaims{}
+	_, err := jwt.ParseWithClaims(
+		value,
+		claims,
+		func(token *jwt.Token) (any, error) {
+			if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
+				return nil, ErrInvalid
+			}
+			return v.secret, nil
+		},
+		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
+		jwt.WithExpirationRequired(),
+	)
 	if err != nil {
 		return "", ErrInvalid
 	}
-
-	return string(data), nil
+	return claims.Subject, nil
 }

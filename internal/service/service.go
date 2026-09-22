@@ -18,8 +18,8 @@ type Repository interface {
 	Write(ctx context.Context, url model.URL) error
 	WriteBatch(ctx context.Context, urls []model.URL) error
 	Get(ctx context.Context, code string) (model.URL, error)
-	GetByUser(string) ([]model.URL, error)
-	DeleteBatch(userID string, codes []string) error
+	GetByUser(ctx context.Context, userID string) ([]model.URL, error)
+	DeleteBatch(ctx context.Context, userID string, codes []string) error
 }
 
 type URLService struct {
@@ -32,14 +32,15 @@ type URLService struct {
 const (
 	defaultFlushInterval = 100 * time.Millisecond
 	defaultQueueSize     = 256
+	defaultBufferLimit   = 256
 )
 
 func New(repo Repository, baseURL string, collisionRetries int) *URLService {
-	return NewWithDeleter(repo, baseURL, collisionRetries, defaultFlushInterval, defaultQueueSize)
+	return NewWithDeleter(repo, baseURL, collisionRetries, defaultFlushInterval, defaultQueueSize, defaultBufferLimit)
 }
 
-func NewWithDeleter(repo Repository, baseURL string, collisionRetries int, flushInterval time.Duration, queueSize int) *URLService {
-	dl := newDeleter(repo, flushInterval, queueSize)
+func NewWithDeleter(repo Repository, baseURL string, collisionRetries int, flushInterval time.Duration, queueSize int, bufferLimit int) *URLService {
+	dl := newDeleter(repo, flushInterval, queueSize, bufferLimit)
 	dl.start()
 	return &URLService{
 		repo:             repo,
@@ -194,6 +195,6 @@ func (srv URLService) Delete(userID string, codes []string) error {
 	return nil
 }
 
-func (srv URLService) ListByUser(userID string) ([]model.URL, error) {
-	return srv.repo.GetByUser(userID)
+func (srv URLService) ListByUser(ctx context.Context, userID string) ([]model.URL, error) {
+	return srv.repo.GetByUser(ctx, userID)
 }

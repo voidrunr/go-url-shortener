@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -29,8 +30,8 @@ func newHandlerWithPinger(svc handler.Shortener, p handler.Pinger) http.Handler 
 	return handler.New(svc, handler.WithPinger(p)).Router()
 }
 
-func newHandlerWithAuth(svc handler.Shortener, a *auth.Auth) http.Handler {
-	return handler.New(svc, handler.WithAuth(a), handler.WithBaseURL("http://localhost:8080")).Router()
+func newHandlerWithAuth(svc handler.Shortener, s *auth.Signer) http.Handler {
+	return handler.New(svc, handler.WithAuth(s), handler.WithBaseURL("http://localhost:8080")).Router()
 }
 
 // --- POST / ---
@@ -524,7 +525,7 @@ func TestHandleUserURLs(t *testing.T) {
 			wantCode:   http.StatusNoContent,
 			sendCookie: false,
 			setup: func(m *mocks.Shortener) {
-				m.EXPECT().ListByUser(mock.AnythingOfType("string")).Return(nil, nil)
+				m.EXPECT().ListByUser(mock.Anything, mock.Anything).Return(nil, nil)
 			},
 		},
 		{
@@ -537,7 +538,7 @@ func TestHandleUserURLs(t *testing.T) {
 			sendCookie: true,
 			cookieUser: "user-1",
 			setup: func(m *mocks.Shortener) {
-				m.EXPECT().ListByUser("user-1").Return(nil, nil)
+				m.EXPECT().ListByUser(mock.Anything, "user-1").Return(nil, nil)
 			},
 			wantCode:   http.StatusNoContent,
 			wantNoBody: true,
@@ -547,7 +548,7 @@ func TestHandleUserURLs(t *testing.T) {
 			sendCookie: true,
 			cookieUser: "user-1",
 			setup: func(m *mocks.Shortener) {
-				m.EXPECT().ListByUser("user-1").Return([]model.URL{
+				m.EXPECT().ListByUser(mock.Anything, "user-1").Return([]model.URL{
 					{Code: "abc123", Original: "https://one.example"},
 					{Code: "def456", Original: "https://two.example"},
 				}, nil)
@@ -563,7 +564,7 @@ func TestHandleUserURLs(t *testing.T) {
 			sendCookie: true,
 			cookieUser: "user-1",
 			setup: func(m *mocks.Shortener) {
-				m.EXPECT().ListByUser("user-1").Return(nil, io.ErrUnexpectedEOF)
+				m.EXPECT().ListByUser(mock.Anything, "user-1").Return(nil, io.ErrUnexpectedEOF)
 			},
 			wantCode: http.StatusInternalServerError,
 		},
@@ -578,12 +579,17 @@ func TestHandleUserURLs(t *testing.T) {
 
 			req := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
 			if tt.sendCookie {
-				c := auth.New("test-secret").Cookie(tt.cookieUser)
-				req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: c.Value})
+				s, err := auth.NewSigner("test-secret", time.Hour)
+				require.NoError(t, err)
+				c, err := s.Cookie(tt.cookieUser)
+				require.NoError(t, err)
+				req.AddCookie(c)
 			}
 			w := httptest.NewRecorder()
 
-			newHandlerWithAuth(svc, auth.New("test-secret")).ServeHTTP(w, req)
+			s, err := auth.NewSigner("test-secret", time.Hour)
+			require.NoError(t, err)
+			newHandlerWithAuth(svc, s).ServeHTTP(w, req)
 
 			res := w.Result()
 			defer res.Body.Close()
@@ -608,12 +614,14 @@ func TestHandleUserURLs(t *testing.T) {
 
 func TestHandleUserURLs_SetsCookieOnFirstVisit(t *testing.T) {
 	svc := mocks.NewShortener(t)
-	svc.EXPECT().ListByUser(mock.AnythingOfType("string")).Return(nil, nil)
+	svc.EXPECT().ListByUser(mock.Anything, mock.Anything).Return(nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
 	w := httptest.NewRecorder()
 
-	newHandlerWithAuth(svc, auth.New("test-secret")).ServeHTTP(w, req)
+	s, err := auth.NewSigner("test-secret", time.Hour)
+	require.NoError(t, err)
+	newHandlerWithAuth(svc, s).ServeHTTP(w, req)
 
 	res := w.Result()
 	defer res.Body.Close()
@@ -686,14 +694,19 @@ func TestHandleDeleteUserURLs(t *testing.T) {
 				tt.setup(svc)
 			}
 
-			req := httptest.NewRequest(http.MethodDelete, "/api/user/urls", strings.NewReader(tt.body))
+req := httptest.NewRequest(http.MethodDelete, "/api/user/urls", strings.NewReader(tt.body))
 			if tt.sendCookie {
-				c := auth.New("test-secret").Cookie(tt.cookieUser)
-				req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: c.Value})
+				s, err := auth.NewSigner("test-secret", time.Hour)
+				require.NoError(t, err)
+				c, err := s.Cookie(tt.cookieUser)
+				require.NoError(t, err)
+				req.AddCookie(c)
 			}
 			w := httptest.NewRecorder()
 
-			newHandlerWithAuth(svc, auth.New("test-secret")).ServeHTTP(w, req)
+			s, err := auth.NewSigner("test-secret", time.Hour)
+			require.NoError(t, err)
+			newHandlerWithAuth(svc, s).ServeHTTP(w, req)
 
 			assert.Equal(t, tt.wantCode, w.Code)
 		})

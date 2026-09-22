@@ -213,19 +213,19 @@ func TestPostgresRepository_GetByUser(t *testing.T) {
 	require.NoError(t, repo.Write(context.Background(), u2))
 	require.NoError(t, repo.Write(context.Background(), u3))
 
-	got, err := repo.GetByUser("user-a")
+	got, err := repo.GetByUser(context.Background(), "user-a")
 	require.NoError(t, err)
 	assert.Len(t, got, 2)
 	for _, u := range got {
 		assert.Equal(t, "user-a", u.UserID)
 	}
 
-	other, err := repo.GetByUser("user-b")
+	other, err := repo.GetByUser(context.Background(), "user-b")
 	require.NoError(t, err)
 	assert.Len(t, other, 1)
 	assert.Equal(t, "user-b", other[0].UserID)
 
-	none, err := repo.GetByUser("nobody")
+	none, err := repo.GetByUser(context.Background(), "nobody")
 	require.NoError(t, err)
 	assert.Empty(t, none)
 }
@@ -266,7 +266,7 @@ func TestPostgresRepository_DeleteBatch(t *testing.T) {
 	require.NoError(t, repo.Write(context.Background(), u2))
 	require.NoError(t, repo.Write(context.Background(), u3))
 
-	require.NoError(t, repo.DeleteBatch("user-a", []string{codes[0], codes[1], "missing"}))
+	require.NoError(t, repo.DeleteBatch(context.Background(), "user-a", []string{codes[0], codes[1], "missing"}))
 
 	got1, err := repo.Get(context.Background(), codes[0])
 	require.NoError(t, err)
@@ -280,7 +280,7 @@ func TestPostgresRepository_DeleteBatch(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, got3.Deleted)
 
-	require.NoError(t, repo.DeleteBatch("nobody", []string{codes[0]}))
+	require.NoError(t, repo.DeleteBatch(context.Background(), "nobody", []string{codes[0]}))
 	got1, err = repo.Get(context.Background(), codes[0])
 	require.NoError(t, err)
 	assert.True(t, got1.Deleted)

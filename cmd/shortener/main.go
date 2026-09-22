@@ -20,7 +20,15 @@ import (
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
 
-	cfg := config.Parse()
+	cfg, err := config.Parse()
+	if err != nil {
+		log.Fatal().Err(err).Msg("invalid configuration")
+	}
+
+	signer, err := auth.NewSigner(cfg.SecretKey, cfg.TokenTTL)
+	if err != nil {
+		log.Fatal().Err(err).Msg("invalid auth configuration")
+	}
 
 	repo, db, err := buildRepository(cfg)
 	if err != nil {
@@ -33,7 +41,7 @@ func main() {
 	svc := service.New(repo, cfg.BaseURL, cfg.CollisionRetries)
 
 	opts := []handler.Option{
-		handler.WithAuth(auth.New(cfg.SecretKey)),
+		handler.WithAuth(signer),
 		handler.WithBaseURL(cfg.BaseURL),
 		handler.WithLogger(log.Logger),
 	}

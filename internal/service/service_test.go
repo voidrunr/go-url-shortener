@@ -96,7 +96,7 @@ func (r *stubRepo) Get(ctx context.Context, code string) (model.URL, error) {
 	return u, nil
 }
 
-func (r *stubRepo) GetByUser(userID string) ([]model.URL, error) {
+func (r *stubRepo) GetByUser(ctx context.Context, userID string) ([]model.URL, error) {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
@@ -109,7 +109,7 @@ func (r *stubRepo) GetByUser(userID string) ([]model.URL, error) {
 	return urls, nil
 }
 
-func (r *stubRepo) DeleteBatch(userID string, codes []string) error {
+func (r *stubRepo) DeleteBatch(ctx context.Context, userID string, codes []string) error {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -217,19 +217,19 @@ func TestListByUser(t *testing.T) {
 	_, err = svc.Shorten("https://two.example", "user-b")
 	require.NoError(t, err)
 
-	urls, err := svc.ListByUser("user-a")
+	urls, err := svc.ListByUser(context.Background(), "user-a")
 	require.NoError(t, err)
 	require.Len(t, urls, 1)
 	assert.Equal(t, "https://one.example", urls[0].Original)
 
-	empty, err := svc.ListByUser("nobody")
+	empty, err := svc.ListByUser(context.Background(), "nobody")
 	require.NoError(t, err)
 	assert.Empty(t, empty)
 }
 
 func TestDelete_MarksOwnedURLsAsGone(t *testing.T) {
 	repo := newStubRepo()
-	svc := NewWithDeleter(repo, "http://localhost:8080", 5, 10*time.Millisecond, 16)
+	svc := NewWithDeleter(repo, "http://localhost:8080", 5, 10*time.Millisecond, 16, 64)
 
 	urlA1, err := svc.Shorten("https://delete-one.example", "user-a")
 	require.NoError(t, err)
@@ -259,7 +259,7 @@ func TestDelete_MarksOwnedURLsAsGone(t *testing.T) {
 
 func TestDelete_EmptyCodesIsNoop(t *testing.T) {
 	repo := newStubRepo()
-	svc := NewWithDeleter(repo, "http://localhost:8080", 5, 10*time.Millisecond, 16)
+	svc := NewWithDeleter(repo, "http://localhost:8080", 5, 10*time.Millisecond, 16, 64)
 
 	url, err := svc.Shorten("https://keep.example", "user-a")
 	require.NoError(t, err)
@@ -274,7 +274,7 @@ func TestDelete_EmptyCodesIsNoop(t *testing.T) {
 
 func TestResolve_DeletedURLReturnsGone(t *testing.T) {
 	repo := newStubRepo()
-	svc := NewWithDeleter(repo, "http://localhost:8080", 5, 10*time.Millisecond, 16)
+	svc := NewWithDeleter(repo, "http://localhost:8080", 5, 10*time.Millisecond, 16, 64)
 
 	url, err := svc.Shorten("https://gone.example", "user-a")
 	require.NoError(t, err)
@@ -302,4 +302,44 @@ func TestShorten_RetriesOnConflict(t *testing.T) {
 	got, err := repo.Get(context.Background(), code)
 	require.NoError(t, err)
 	assert.Equal(t, "https://retry.example", got.Original)
+}
+
+func TestDeleterEnqueueDoesNotBlockWhenQueueFull(t *testing.T) {
+	d := newDeleter(nil, time.Hour, 0, 1)
+
+	done := make(chan struct{})
+	go func() {
+		d.enqueue(deleteRequest{userID: "user-a", codes: []string{"c1"}})
+		d.enqueue(deleteRequest{userID: "user-a", codes: []string{"c2"}})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("enqueue blocked on a full backlog")
+	}
+}
+
+func TestDeleterFlushesWhenBufferFull(t *testing.T) {
+	repo := newStubRepo()
+	svc := NewWithDeleter(repo, "http://localhost:8080", 5, time.Hour, 16, 2)
+
+	var codes []string
+	for _, original := range []string{"https://one.example", "https://two.example"} {
+		url, err := svc.Shorten(original, "user-a")
+		require.NoError(t, err)
+		codes = append(codes, strings.TrimPrefix(url, "http://localhost:8080/"))
+	}
+
+	require.NoError(t, svc.Delete("user-a", []string{codes[0]}))
+	require.NoError(t, svc.Delete("user-a", []string{codes[1]}))
+
+	require.Eventually(t, func() bool {
+		_, err := svc.Resolve(codes[0])
+		return errors.Is(err, repository.ErrGone)
+	}, 2*time.Second, 10*time.Millisecond)
+
+	_, err := svc.Resolve(codes[1])
+	require.ErrorIs(t, err, repository.ErrGone)
 }

@@ -3,6 +3,8 @@
 package mocks
 
 import (
+	"context"
+
 	mock "github.com/stretchr/testify/mock"
 
 	"github.com/voidrunr/go-url-shortener/internal/model"
@@ -193,9 +195,9 @@ func (_c *Shortener_ShortenBatch_Call) RunAndReturn(run func([]model.BatchItem, 
 	return _c
 }
 
-// ListByUser provides a mock function with given fields: _a0
-func (_m *Shortener) ListByUser(_a0 string) ([]model.URL, error) {
-	ret := _m.Called(_a0)
+// ListByUser provides a mock function with given fields: _a0, _a1
+func (_m *Shortener) ListByUser(_a0 context.Context, _a1 string) ([]model.URL, error) {
+	ret := _m.Called(_a0, _a1)
 
 	if len(ret) == 0 {
 		panic("no return value specified for ListByUser")
@@ -203,19 +205,19 @@ func (_m *Shortener) ListByUser(_a0 string) ([]model.URL, error) {
 
 	var r0 []model.URL
 	var r1 error
-	if rf, ok := ret.Get(0).(func(string) ([]model.URL, error)); ok {
-		return rf(_a0)
+	if rf, ok := ret.Get(0).(func(context.Context, string) ([]model.URL, error)); ok {
+		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(string) []model.URL); ok {
-		r0 = rf(_a0)
+	if rf, ok := ret.Get(0).(func(context.Context, string) []model.URL); ok {
+		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]model.URL)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(string) error); ok {
-		r1 = rf(_a0)
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
 	}
@@ -229,14 +231,15 @@ type Shortener_ListByUser_Call struct {
 }
 
 // ListByUser is a helper method to define mock.On call
-//   - _a0 string
-func (_e *Shortener_Expecter) ListByUser(_a0 interface{}) *Shortener_ListByUser_Call {
-	return &Shortener_ListByUser_Call{Call: _e.mock.On("ListByUser", _a0)}
+//   - _a0 context.Context
+//   - _a1 string
+func (_e *Shortener_Expecter) ListByUser(_a0 interface{}, _a1 interface{}) *Shortener_ListByUser_Call {
+	return &Shortener_ListByUser_Call{Call: _e.mock.On("ListByUser", _a0, _a1)}
 }
 
-func (_c *Shortener_ListByUser_Call) Run(run func(_a0 string)) *Shortener_ListByUser_Call {
+func (_c *Shortener_ListByUser_Call) Run(run func(_a0 context.Context, _a1 string)) *Shortener_ListByUser_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
@@ -246,7 +249,7 @@ func (_c *Shortener_ListByUser_Call) Return(_a0 []model.URL, _a1 error) *Shorten
 	return _c
 }
 
-func (_c *Shortener_ListByUser_Call) RunAndReturn(run func(string) ([]model.URL, error)) *Shortener_ListByUser_Call {
+func (_c *Shortener_ListByUser_Call) RunAndReturn(run func(context.Context, string) ([]model.URL, error)) *Shortener_ListByUser_Call {
 	_c.Call.Return(run)
 	return _c
 }

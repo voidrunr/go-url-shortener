@@ -88,7 +88,7 @@ func TestMemoryRepository(t *testing.T) {
 		require.NoError(t, repo.Write(context.Background(), u2))
 		require.NoError(t, repo.Write(context.Background(), u3))
 
-		got, err := repo.GetByUser("user-a")
+		got, err := repo.GetByUser(context.Background(), "user-a")
 		require.NoError(t, err)
 		assert.Len(t, got, 2)
 
@@ -96,11 +96,11 @@ func TestMemoryRepository(t *testing.T) {
 			assert.Equal(t, "user-a", u.UserID)
 		}
 
-		other, err := repo.GetByUser("user-b")
+		other, err := repo.GetByUser(context.Background(), "user-b")
 		require.NoError(t, err)
 		assert.Len(t, other, 1)
 
-		none, err := repo.GetByUser("nobody")
+		none, err := repo.GetByUser(context.Background(), "nobody")
 		require.NoError(t, err)
 		assert.Empty(t, none)
 	})
@@ -135,7 +135,7 @@ func TestMemoryRepository(t *testing.T) {
 		require.NoError(t, repo.Write(context.Background(), u2))
 		require.NoError(t, repo.Write(context.Background(), u3))
 
-		require.NoError(t, repo.DeleteBatch("user-a", []string{"e1", "e2", "missing"}))
+		require.NoError(t, repo.DeleteBatch(context.Background(), "user-a", []string{"e1", "e2", "missing"}))
 
 		got1, err := repo.Get(context.Background(), "e1")
 		require.NoError(t, err)

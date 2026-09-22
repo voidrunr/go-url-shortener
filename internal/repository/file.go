@@ -106,8 +106,8 @@ func (repo *FileRepository) Delete(ctx context.Context, url model.URL) error {
 }
 
 func (repo *FileRepository) Get(ctx context.Context, code string) (model.URL, error) {
-	repo.mutex.Lock()
-	defer repo.mutex.Unlock()
+	repo.mutex.RLock()
+	defer repo.mutex.RUnlock()
 
 	url, ok := repo.store[code]
 
@@ -118,7 +118,7 @@ func (repo *FileRepository) Get(ctx context.Context, code string) (model.URL, er
 	return url, nil
 }
 
-func (repo *FileRepository) GetByUser(userID string) ([]model.URL, error) {
+func (repo *FileRepository) GetByUser(ctx context.Context, userID string) ([]model.URL, error) {
 	repo.mutex.RLock()
 	defer repo.mutex.RUnlock()
 
@@ -132,7 +132,7 @@ func (repo *FileRepository) GetByUser(userID string) ([]model.URL, error) {
 	return urls, nil
 }
 
-func (repo *FileRepository) DeleteBatch(userID string, codes []string) error {
+func (repo *FileRepository) DeleteBatch(ctx context.Context, userID string, codes []string) error {
 	repo.mutex.Lock()
 	defer repo.mutex.Unlock()
 
