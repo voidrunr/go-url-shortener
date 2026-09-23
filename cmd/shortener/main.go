@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"github.com/voidrunr/go-url-shortener/internal/audit"
 	"github.com/voidrunr/go-url-shortener/internal/auth"
 	"github.com/voidrunr/go-url-shortener/internal/config"
 	"github.com/voidrunr/go-url-shortener/internal/database"
@@ -40,10 +41,19 @@ func main() {
 
 	svc := service.New(repo, cfg.BaseURL, cfg.CollisionRetries)
 
+	emitter := audit.NewEmitter()
+	if cfg.AuditFile != "" {
+		emitter.Subscribe(audit.NewFileSink(cfg.AuditFile))
+	}
+	if cfg.AuditURL != "" {
+		emitter.Subscribe(audit.NewHTTPSink(cfg.AuditURL))
+	}
+
 	opts := []handler.Option{
 		handler.WithAuth(signer),
 		handler.WithBaseURL(cfg.BaseURL),
 		handler.WithLogger(log.Logger),
+		handler.WithAudit(emitter),
 	}
 	if db != nil {
 		opts = append(opts, handler.WithPinger(db))

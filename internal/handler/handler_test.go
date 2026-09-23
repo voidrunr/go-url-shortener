@@ -15,6 +15,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/voidrunr/go-url-shortener/internal/audit"
 	"github.com/voidrunr/go-url-shortener/internal/auth"
 	"github.com/voidrunr/go-url-shortener/internal/handler"
 	"github.com/voidrunr/go-url-shortener/internal/handler/mocks"
@@ -32,6 +33,120 @@ func newHandlerWithPinger(svc handler.Shortener, p handler.Pinger) http.Handler 
 
 func newHandlerWithAuth(svc handler.Shortener, s *auth.Signer) http.Handler {
 	return handler.New(svc, handler.WithAuth(s), handler.WithBaseURL("http://localhost:8080")).Router()
+}
+
+// --- audit ---
+
+type auditRecorder struct {
+	events []audit.Event
+}
+
+func (r *auditRecorder) Write(ev audit.Event) error {
+	r.events = append(r.events, ev)
+	return nil
+}
+
+func TestAudit_ShortenPlain(t *testing.T) {
+	svc := mocks.NewShortener(t)
+	svc.EXPECT().Shorten("https://practicum.yandex.ru/", "").Return("http://localhost:8080/EwHXdJfB", nil)
+
+	rec := &auditRecorder{}
+	emitter := audit.NewEmitter()
+	emitter.Subscribe(rec)
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://practicum.yandex.ru/"))
+	w := httptest.NewRecorder()
+
+	handler.New(svc, handler.WithAudit(emitter)).Router().ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	require.Len(t, rec.events, 1)
+	assert.Equal(t, audit.ActionShorten, rec.events[0].Action)
+	assert.Equal(t, "https://practicum.yandex.ru/", rec.events[0].URL)
+	assert.NotZero(t, rec.events[0].TS)
+}
+
+func TestAudit_ShortenAPI(t *testing.T) {
+	svc := mocks.NewShortener(t)
+	svc.EXPECT().Shorten("https://practicum.yandex.ru/", "").Return("http://localhost:8080/EwHXdJfB", nil)
+
+	rec := &auditRecorder{}
+	emitter := audit.NewEmitter()
+	emitter.Subscribe(rec)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(`{"url":"https://practicum.yandex.ru/"}`))
+	w := httptest.NewRecorder()
+
+	handler.New(svc, handler.WithAudit(emitter)).Router().ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusCreated, w.Code)
+	require.Len(t, rec.events, 1)
+	assert.Equal(t, audit.ActionShorten, rec.events[0].Action)
+	assert.Equal(t, "https://practicum.yandex.ru/", rec.events[0].URL)
+	assert.NotZero(t, rec.events[0].TS)
+}
+
+func TestAudit_ShortenDuplicate(t *testing.T) {
+	svc := mocks.NewShortener(t)
+	svc.EXPECT().Shorten("https://practicum.yandex.ru/", "").Return("http://localhost:8080/EwHXdJfB", repository.ErrURLAlreadyExists)
+
+	rec := &auditRecorder{}
+	emitter := audit.NewEmitter()
+	emitter.Subscribe(rec)
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://practicum.yandex.ru/"))
+	w := httptest.NewRecorder()
+
+	handler.New(svc, handler.WithAudit(emitter)).Router().ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusConflict, w.Code)
+	require.Len(t, rec.events, 1)
+	assert.Equal(t, audit.ActionShorten, rec.events[0].Action)
+	assert.Equal(t, "https://practicum.yandex.ru/", rec.events[0].URL)
+}
+
+func TestAudit_Follow(t *testing.T) {
+	svc := mocks.NewShortener(t)
+	svc.EXPECT().Resolve("EwHXdJfB").Return("https://practicum.yandex.ru/long/path", nil)
+
+	rec := &auditRecorder{}
+	emitter := audit.NewEmitter()
+	emitter.Subscribe(rec)
+
+	s, err := auth.NewSigner("test-secret", time.Hour)
+	require.NoError(t, err)
+	c, err := s.Cookie("user-1")
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/EwHXdJfB", nil)
+	req.AddCookie(c)
+	w := httptest.NewRecorder()
+
+	handler.New(svc, handler.WithAuth(s), handler.WithBaseURL("http://localhost:8080"), handler.WithAudit(emitter)).Router().ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
+	require.Len(t, rec.events, 1)
+	assert.Equal(t, audit.ActionFollow, rec.events[0].Action)
+	assert.Equal(t, "user-1", rec.events[0].UserID)
+	assert.Equal(t, "https://practicum.yandex.ru/long/path", rec.events[0].URL)
+	assert.NotZero(t, rec.events[0].TS)
+}
+
+func TestAudit_NoAuditOnError(t *testing.T) {
+	svc := mocks.NewShortener(t)
+	svc.EXPECT().Shorten("https://example.com", "").Return("", io.ErrUnexpectedEOF)
+
+	rec := &auditRecorder{}
+	emitter := audit.NewEmitter()
+	emitter.Subscribe(rec)
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://example.com"))
+	w := httptest.NewRecorder()
+
+	handler.New(svc, handler.WithAudit(emitter)).Router().ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
+	assert.Empty(t, rec.events)
 }
 
 // --- POST / ---
@@ -694,7 +809,7 @@ func TestHandleDeleteUserURLs(t *testing.T) {
 				tt.setup(svc)
 			}
 
-req := httptest.NewRequest(http.MethodDelete, "/api/user/urls", strings.NewReader(tt.body))
+			req := httptest.NewRequest(http.MethodDelete, "/api/user/urls", strings.NewReader(tt.body))
 			if tt.sendCookie {
 				s, err := auth.NewSigner("test-secret", time.Hour)
 				require.NoError(t, err)
