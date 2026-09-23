@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"github.com/voidrunr/go-url-shortener/internal/auth"
 	"github.com/voidrunr/go-url-shortener/internal/config"
 	"github.com/voidrunr/go-url-shortener/internal/database"
 	"github.com/voidrunr/go-url-shortener/internal/database/migrations"
@@ -19,7 +20,15 @@ import (
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
 
-	cfg := config.Parse()
+	cfg, err := config.Parse()
+	if err != nil {
+		log.Fatal().Err(err).Msg("invalid configuration")
+	}
+
+	signer, err := auth.NewSigner(cfg.SecretKey, cfg.TokenTTL)
+	if err != nil {
+		log.Fatal().Err(err).Msg("invalid auth configuration")
+	}
 
 	repo, db, err := buildRepository(cfg)
 	if err != nil {
@@ -32,6 +41,8 @@ func main() {
 	svc := service.New(repo, cfg.BaseURL, cfg.CollisionRetries)
 
 	opts := []handler.Option{
+		handler.WithAuth(signer),
+		handler.WithBaseURL(cfg.BaseURL),
 		handler.WithLogger(log.Logger),
 	}
 	if db != nil {
