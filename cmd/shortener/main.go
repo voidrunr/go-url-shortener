@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 
 	"github.com/rs/zerolog"
@@ -61,6 +62,15 @@ func main() {
 	hlr := handler.New(svc, opts...)
 
 	log.Info().Str("address", cfg.ServerAddress).Msg("serving")
+
+	if cfg.PprofAddress != "" {
+		go func() {
+			log.Info().Str("address", cfg.PprofAddress).Msg("pprof server")
+			if err := http.ListenAndServe(cfg.PprofAddress, nil); err != nil {
+				log.Error().Err(err).Msg("pprof server error")
+			}
+		}()
+	}
 
 	err = http.ListenAndServe(cfg.ServerAddress, hlr.Router())
 	if err != nil {

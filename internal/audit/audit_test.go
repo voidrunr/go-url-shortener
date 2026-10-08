@@ -3,6 +3,7 @@ package audit
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -94,4 +95,43 @@ func TestHTTPSinkWrite(t *testing.T) {
 	assert.Equal(t, string(ev.Action), received["action"])
 	assert.Equal(t, ev.UserID, received["user_id"])
 	assert.Equal(t, ev.URL, received["url"])
+}
+
+type failingSink struct {
+	err error
+}
+
+func (f failingSink) Write(Event) error {
+	return f.err
+}
+
+func TestEmitterNotifySinkErrorDoesNotPanic(t *testing.T) {
+	e := NewEmitter()
+	e.Subscribe(failingSink{err: errors.New("sink down")})
+
+	e.Notify(Event{TS: 1, Action: ActionShorten, UserID: "u1", URL: "https://example.com"})
+}
+
+func TestEmitterUnsubscribeUnknownSink(t *testing.T) {
+	e := NewEmitter()
+	keep := &recorder{}
+	e.Subscribe(keep)
+	e.Unsubscribe(&recorder{})
+
+	e.Notify(Event{Action: ActionFollow})
+	require.Len(t, keep.events, 1)
+}
+
+func TestFileSinkWriteOpenError(t *testing.T) {
+	sink := NewFileSink(filepath.Join(t.TempDir(), "missing-dir", "audit.log"))
+
+	err := sink.Write(Event{TS: 1, Action: ActionShorten})
+	require.Error(t, err)
+}
+
+func TestHTTPSinkWriteNetworkError(t *testing.T) {
+	sink := NewHTTPSink("http://127.0.0.1:1/audit")
+
+	err := sink.Write(Event{TS: 1, Action: ActionShorten})
+	require.Error(t, err)
 }

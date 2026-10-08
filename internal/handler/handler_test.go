@@ -15,6 +15,8 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/rs/zerolog"
+
 	"github.com/voidrunr/go-url-shortener/internal/audit"
 	"github.com/voidrunr/go-url-shortener/internal/auth"
 	"github.com/voidrunr/go-url-shortener/internal/handler"
@@ -840,4 +842,41 @@ func TestHandleResolve_DeletedURLReturnsGone(t *testing.T) {
 	newHandler(svc).ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusGone, w.Code)
+}
+
+// --- options ---
+
+func TestWithLoggerOption(t *testing.T) {
+	svc := mocks.NewShortener(t)
+	svc.EXPECT().Resolve("abc").Return("https://example.com", nil)
+
+	hlr := handler.New(svc, handler.WithLogger(zerolog.Nop()))
+	req := httptest.NewRequest(http.MethodGet, "/abc", nil)
+	w := httptest.NewRecorder()
+
+	hlr.Router().ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
+}
+
+// --- GET /api/user/urls with invalid base URL ---
+
+func TestHandleUserURLs_InvalidBaseURLReturns500(t *testing.T) {
+	svc := mocks.NewShortener(t)
+	s, err := auth.NewSigner("test-secret", time.Hour)
+	require.NoError(t, err)
+	c, err := s.Cookie("user-1")
+	require.NoError(t, err)
+
+	svc.EXPECT().ListByUser(mock.Anything, "user-1").Return([]model.URL{
+		{Code: "abc123", Original: "https://one.example"},
+	}, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+	req.AddCookie(c)
+	w := httptest.NewRecorder()
+
+	handler.New(svc, handler.WithAuth(s), handler.WithBaseURL("http://%zz")).Router().ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }

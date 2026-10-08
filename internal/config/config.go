@@ -17,6 +17,7 @@ type Config struct {
 	TokenTTL         time.Duration
 	AuditFile        string
 	AuditURL         string
+	PprofAddress     string
 }
 
 func Parse() (Config, error) {
@@ -31,6 +32,7 @@ func Parse() (Config, error) {
 	flag.DurationVar(&cfg.TokenTTL, "token-ttl", 24*time.Hour, "auth token lifetime")
 	flag.StringVar(&cfg.AuditFile, "audit-file", "", "path to file sink for audit events")
 	flag.StringVar(&cfg.AuditURL, "audit-url", "", "URL of remote sink for audit events")
+	flag.StringVar(&cfg.PprofAddress, "pprof-address", "", "address for the pprof debug server (empty = disabled)")
 	flag.Parse()
 
 	env := map[string]*string{
@@ -41,6 +43,7 @@ func Parse() (Config, error) {
 		"SECRET_KEY":        &cfg.SecretKey,
 		"AUDIT_FILE":        &cfg.AuditFile,
 		"AUDIT_URL":         &cfg.AuditURL,
+		"PPROF_ADDRESS":     &cfg.PprofAddress,
 	}
 	for name, target := range env {
 		if val := os.Getenv(name); val != "" {
