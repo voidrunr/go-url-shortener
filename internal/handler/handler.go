@@ -14,6 +14,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/voidrunr/go-url-shortener/internal/audit"
 	"github.com/voidrunr/go-url-shortener/internal/auth"
 	"github.com/voidrunr/go-url-shortener/internal/middleware"
 	"github.com/voidrunr/go-url-shortener/internal/model"
@@ -58,12 +59,19 @@ func WithLogger(l zerolog.Logger) Option {
 	}
 }
 
+func WithAudit(e *audit.Emitter) Option {
+	return func(hlr *URLHandler) {
+		hlr.audit = e
+	}
+}
+
 type URLHandler struct {
 	svc     Shortener
 	pinger  Pinger
 	auth    *auth.Signer
 	baseURL string
 	logger  zerolog.Logger
+	audit   *audit.Emitter
 }
 
 func New(svc Shortener, opts ...Option) *URLHandler {
@@ -93,6 +101,18 @@ func (hlr *URLHandler) Router() http.Handler {
 	r.Get("/ping", hlr.handlePing)
 	r.Get("/{code}", hlr.handleResolve)
 	return r
+}
+
+func (hlr *URLHandler) emit(action audit.Action, userID, originalURL string) {
+	if hlr.audit == nil {
+		return
+	}
+	hlr.audit.Notify(audit.Event{
+		TS:     time.Now().Unix(),
+		Action: action,
+		UserID: userID,
+		URL:    originalURL,
+	})
 }
 
 func (hlr *URLHandler) handlePing(w http.ResponseWriter, r *http.Request) {
@@ -129,6 +149,7 @@ func (hlr *URLHandler) handleShorten(w http.ResponseWriter, r *http.Request) {
 	shortURL, err := hlr.svc.Shorten(originalURL, userID)
 	if err != nil {
 		if errors.Is(err, repository.ErrURLAlreadyExists) {
+			hlr.emit(audit.ActionShorten, userID, originalURL)
 			w.Header().Set("Content-Type", "text/plain")
 			w.WriteHeader(http.StatusConflict)
 			w.Write([]byte(shortURL))
@@ -141,6 +162,7 @@ func (hlr *URLHandler) handleShorten(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(shortURL))
+	hlr.emit(audit.ActionShorten, userID, originalURL)
 }
 
 type shortenRequest struct {
@@ -179,11 +201,14 @@ func (hlr *URLHandler) handleAPIShorten(w http.ResponseWriter, r *http.Request) 
 			if err := json.NewEncoder(w).Encode(resp); err != nil {
 				hlr.logger.Error().Err(err).Msg("failed to encode response")
 			}
+			hlr.emit(audit.ActionShorten, userID, req.URL)
 			return
 		}
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+
+	hlr.emit(audit.ActionShorten, userID, req.URL)
 
 	resp := shortenResponse{Result: shortURL}
 	w.Header().Set("Content-Type", "application/json")
@@ -257,6 +282,7 @@ func (hlr *URLHandler) handleResolve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, originalURL, http.StatusTemporaryRedirect)
+	hlr.emit(audit.ActionFollow, auth.UserIDFromContext(r.Context()), originalURL)
 }
 
 func (hlr *URLHandler) handleDeleteUserURLs(w http.ResponseWriter, r *http.Request) {
