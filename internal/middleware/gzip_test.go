@@ -149,7 +149,10 @@ func resetRecorder(rec *httptest.ResponseRecorder) {
 	rec.Body.Reset()
 	rec.Code = http.StatusOK
 	rec.Flushed = false
-	clear(rec.HeaderMap)
+
+	for key := range rec.Header() {
+		rec.Header().Del(key)
+	}
 }
 
 func BenchmarkGzipUncompressed(b *testing.B) {
