@@ -43,6 +43,11 @@ func main() {
 	svc := service.New(repo, cfg.BaseURL, cfg.CollisionRetries)
 
 	emitter := audit.NewEmitter()
+	defer func() {
+		if err := emitter.Close(); err != nil {
+			log.Error().Err(err).Msg("failed to close audit emitter")
+		}
+	}()
 	if cfg.AuditFile != "" {
 		emitter.Subscribe(audit.NewFileSink(cfg.AuditFile))
 	}

@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,6 +25,11 @@ func (r *recorder) Write(ev Event) error {
 	return nil
 }
 
+func closeEmitter(t *testing.T, e *Emitter) {
+	t.Helper()
+	require.NoError(t, e.Close())
+}
+
 func TestEmitterNotify(t *testing.T) {
 	e := NewEmitter()
 	one := &recorder{}
@@ -33,6 +39,7 @@ func TestEmitterNotify(t *testing.T) {
 
 	ev := Event{TS: 100, Action: ActionShorten, UserID: "u1", URL: "https://example.com"}
 	e.Notify(ev)
+	closeEmitter(t, e)
 
 	require.Len(t, one.events, 1)
 	require.Len(t, two.events, 1)
@@ -47,6 +54,7 @@ func TestEmitterUnsubscribe(t *testing.T) {
 	e.Unsubscribe(one)
 
 	e.Notify(Event{Action: ActionShorten})
+	closeEmitter(t, e)
 
 	assert.Empty(t, one.events)
 }
@@ -54,6 +62,21 @@ func TestEmitterUnsubscribe(t *testing.T) {
 func TestEmitterNotifyWithoutObservers(t *testing.T) {
 	e := NewEmitter()
 	e.Notify(Event{Action: ActionFollow})
+	closeEmitter(t, e)
+}
+
+func TestEmitterCloseDrainsQueue(t *testing.T) {
+	e := NewEmitter()
+	rec := &recorder{}
+	e.Subscribe(rec)
+
+	const events = 100
+	for i := 0; i < events; i++ {
+		e.Notify(Event{TS: int64(i), Action: ActionShorten})
+	}
+	closeEmitter(t, e)
+
+	require.Len(t, rec.events, events)
 }
 
 func TestFileSinkWrite(t *testing.T) {
@@ -64,6 +87,7 @@ func TestFileSinkWrite(t *testing.T) {
 
 	require.NoError(t, sink.Write(ev))
 	require.NoError(t, sink.Write(ev))
+	require.NoError(t, sink.Close())
 
 	data, err := os.ReadFile(path)
 	require.NoError(t, err)
@@ -74,6 +98,21 @@ func TestFileSinkWrite(t *testing.T) {
 	var got Event
 	require.NoError(t, json.Unmarshal(lines[0], &got))
 	assert.Equal(t, ev, got)
+}
+
+func TestFileSinkCloseIsIdempotent(t *testing.T) {
+	sink := NewFileSink(filepath.Join(t.TempDir(), "audit.log"))
+
+	require.NoError(t, sink.Close())
+	require.NoError(t, sink.Close())
+}
+
+func TestFileSinkWriteAfterClose(t *testing.T) {
+	sink := NewFileSink(filepath.Join(t.TempDir(), "audit.log"))
+	require.NoError(t, sink.Close())
+
+	err := sink.Write(Event{TS: 1, Action: ActionShorten})
+	require.ErrorIs(t, err, os.ErrClosed)
 }
 
 func TestHTTPSinkWrite(t *testing.T) {
@@ -87,6 +126,7 @@ func TestHTTPSinkWrite(t *testing.T) {
 	defer srv.Close()
 
 	sink := NewHTTPSink(srv.URL)
+	defer sink.Close()
 	ev := Event{TS: 42, Action: ActionShorten, UserID: "user-1", URL: "https://long.example/path"}
 
 	require.NoError(t, sink.Write(ev))
@@ -110,6 +150,7 @@ func TestEmitterNotifySinkErrorDoesNotPanic(t *testing.T) {
 	e.Subscribe(failingSink{err: errors.New("sink down")})
 
 	e.Notify(Event{TS: 1, Action: ActionShorten, UserID: "u1", URL: "https://example.com"})
+	closeEmitter(t, e)
 }
 
 func TestEmitterUnsubscribeUnknownSink(t *testing.T) {
@@ -119,7 +160,91 @@ func TestEmitterUnsubscribeUnknownSink(t *testing.T) {
 	e.Unsubscribe(&recorder{})
 
 	e.Notify(Event{Action: ActionFollow})
+	closeEmitter(t, e)
+
 	require.Len(t, keep.events, 1)
+}
+
+type blockingSink struct {
+	started chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (s *blockingSink) Write(Event) error {
+	s.once.Do(func() { close(s.started) })
+	<-s.release
+	return nil
+}
+
+func TestEmitterNotifyDoesNotBlockOnSlowSink(t *testing.T) {
+	e := NewEmitter()
+	sink := &blockingSink{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	e.Subscribe(sink)
+
+	e.Notify(Event{TS: 1, Action: ActionShorten})
+	select {
+	case <-sink.started:
+	case <-time.After(time.Second):
+		t.Fatal("sink did not start")
+	}
+
+	notified := make(chan struct{})
+	go func() {
+		e.Notify(Event{TS: 2, Action: ActionFollow})
+		close(notified)
+	}()
+	select {
+	case <-notified:
+	case <-time.After(time.Second):
+		t.Fatal("Notify blocked on a slow sink")
+	}
+
+	close(sink.release)
+	closeEmitter(t, e)
+}
+
+type closableSink struct {
+	recorder
+	closed bool
+}
+
+func (s *closableSink) Close() error {
+	s.closed = true
+	return nil
+}
+
+func TestEmitterCloseClosesSinks(t *testing.T) {
+	e := NewEmitter()
+	sink := &closableSink{}
+	e.Subscribe(sink)
+
+	e.Notify(Event{Action: ActionShorten})
+	closeEmitter(t, e)
+
+	assert.True(t, sink.closed)
+	require.Len(t, sink.events, 1)
+}
+
+func TestEmitterConcurrentSubscribeNotify(t *testing.T) {
+	e := NewEmitter()
+
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sink := &recorder{}
+			e.Subscribe(sink)
+			e.Notify(Event{Action: ActionShorten})
+			e.Unsubscribe(sink)
+		}()
+	}
+	wg.Wait()
+	closeEmitter(t, e)
 }
 
 func TestFileSinkWriteOpenError(t *testing.T) {
@@ -131,6 +256,7 @@ func TestFileSinkWriteOpenError(t *testing.T) {
 
 func TestHTTPSinkWriteNetworkError(t *testing.T) {
 	sink := NewHTTPSink("http://127.0.0.1:1/audit")
+	defer sink.Close()
 
 	err := sink.Write(Event{TS: 1, Action: ActionShorten})
 	require.Error(t, err)

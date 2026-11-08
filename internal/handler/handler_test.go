@@ -48,6 +48,11 @@ func (r *auditRecorder) Write(ev audit.Event) error {
 	return nil
 }
 
+func closeAudit(t *testing.T, e *audit.Emitter) {
+	t.Helper()
+	require.NoError(t, e.Close())
+}
+
 func TestAudit_ShortenPlain(t *testing.T) {
 	svc := mocks.NewShortener(t)
 	svc.EXPECT().Shorten("https://practicum.yandex.ru/", "").Return("http://localhost:8080/EwHXdJfB", nil)
@@ -60,6 +65,7 @@ func TestAudit_ShortenPlain(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	handler.New(svc, handler.WithAudit(emitter)).Router().ServeHTTP(w, req)
+	closeAudit(t, emitter)
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 	require.Len(t, rec.events, 1)
@@ -80,6 +86,7 @@ func TestAudit_ShortenAPI(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	handler.New(svc, handler.WithAudit(emitter)).Router().ServeHTTP(w, req)
+	closeAudit(t, emitter)
 
 	assert.Equal(t, http.StatusCreated, w.Code)
 	require.Len(t, rec.events, 1)
@@ -100,6 +107,7 @@ func TestAudit_ShortenDuplicate(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	handler.New(svc, handler.WithAudit(emitter)).Router().ServeHTTP(w, req)
+	closeAudit(t, emitter)
 
 	assert.Equal(t, http.StatusConflict, w.Code)
 	require.Len(t, rec.events, 1)
@@ -125,6 +133,7 @@ func TestAudit_Follow(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	handler.New(svc, handler.WithAuth(s), handler.WithBaseURL("http://localhost:8080"), handler.WithAudit(emitter)).Router().ServeHTTP(w, req)
+	closeAudit(t, emitter)
 
 	assert.Equal(t, http.StatusTemporaryRedirect, w.Code)
 	require.Len(t, rec.events, 1)
@@ -146,6 +155,7 @@ func TestAudit_NoAuditOnError(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	handler.New(svc, handler.WithAudit(emitter)).Router().ServeHTTP(w, req)
+	closeAudit(t, emitter)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 	assert.Empty(t, rec.events)

@@ -167,13 +167,13 @@ CPU: ~50% времени — GC (spanClass/scanObject/memclr), 6% — flate.defl
 ```
 
 ```bash
-go test -run='^$' -bench=Gzip -benchmem ./internal/middleware
+go test -run='^$' -bench=Gzip -benchmem -count=5 ./internal/middleware
 ```
 
 | Сценарий | До | После (пул + skip 3xx) |
 |---|---|---|
-| редирект 307 | 81–158 µs/op, **816 KB/op**, 35 allocs | 1.16 µs/op, 1.4 KB/op, 16 allocs |
-| JSON через gzip | — | 23 µs/op, 1.2 KB/op, 12 allocs |
+| редирект 307 | 92–151 µs/op, **815 KB/op**, 26 allocs | 0.68–0.76 µs/op, 400 B/op, 8 allocs |
+| JSON через gzip | 149–159 µs/op, 814 KB/op, 20 allocs | ~25 µs/op, 64 B/op, 3 allocs |
 
 **после**:
 

@@ -59,6 +59,9 @@ func WithLogger(l zerolog.Logger) Option {
 	}
 }
 
+// WithAudit enables audit event emission to e. A nil emitter disables
+// auditing. The handler does not take ownership of e; callers must close it
+// during shutdown.
 func WithAudit(e *audit.Emitter) Option {
 	return func(hlr *URLHandler) {
 		hlr.audit = e

@@ -145,17 +145,28 @@ func TestGzipCompressesJSONAfterExplicitWriteHeader(t *testing.T) {
 	}
 }
 
+func resetRecorder(rec *httptest.ResponseRecorder) {
+	rec.Body.Reset()
+	rec.Code = http.StatusOK
+	rec.Flushed = false
+	clear(rec.HeaderMap)
+}
+
 func BenchmarkGzipUncompressed(b *testing.B) {
 	h := Gzip(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "https://example.com/some/path?x=1&y=2", http.StatusTemporaryRedirect)
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/abc123", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+
+	resetRecorder(rec)
+	h.ServeHTTP(rec, req)
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		rec := httptest.NewRecorder()
+		resetRecorder(rec)
 		h.ServeHTTP(rec, req)
 	}
 }
@@ -168,11 +179,15 @@ func BenchmarkGzipJSON(b *testing.B) {
 	}))
 	req := httptest.NewRequest(http.MethodGet, "/abc123", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
+	rec := httptest.NewRecorder()
+
+	resetRecorder(rec)
+	h.ServeHTTP(rec, req)
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		rec := httptest.NewRecorder()
+		resetRecorder(rec)
 		h.ServeHTTP(rec, req)
 	}
 }
