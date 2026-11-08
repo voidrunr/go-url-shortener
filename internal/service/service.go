@@ -3,11 +3,10 @@ package service
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net/url"
+	"strings"
 	"time"
 
 	"github.com/voidrunr/go-url-shortener/internal/model"
@@ -24,7 +23,7 @@ type Repository interface {
 
 type URLService struct {
 	repo             Repository
-	baseURL          string
+	shortBase        string
 	collisionRetries int
 	deleter          *deleter
 }
@@ -44,32 +43,36 @@ func NewWithDeleter(repo Repository, baseURL string, collisionRetries int, flush
 	dl.start()
 	return &URLService{
 		repo:             repo,
-		baseURL:          baseURL,
+		shortBase:        strings.TrimRight(baseURL, "/") + "/",
 		collisionRetries: collisionRetries,
 		deleter:          dl,
 	}
 }
 
+const codeAlphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
+
 func generateCode(n int) (string, error) {
 	b := make([]byte, n)
 
-	_, err := rand.Read(b)
-	if err != nil {
+	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
 
-	return base64.RawURLEncoding.EncodeToString(b)[:n], nil
+	for i := range b {
+		b[i] = codeAlphabet[int(b[i])%len(codeAlphabet)]
+	}
+
+	return string(b), nil
 }
 
 func generateUUID() (string, error) {
-	b := make([]byte, 16)
+	var b [16]byte
 
-	_, err := rand.Read(b)
-	if err != nil {
+	if _, err := rand.Read(b[:]); err != nil {
 		return "", err
 	}
 
-	return hex.EncodeToString(b), nil
+	return hex.EncodeToString(b[:]), nil
 }
 
 func (srv URLService) Shorten(originalURL string, userID string) (string, error) {
@@ -100,11 +103,7 @@ func (srv URLService) Shorten(originalURL string, userID string) (string, error)
 		if err := srv.repo.Write(context.TODO(), u); err != nil {
 			var dupErr *repository.DuplicateURLError
 			if errors.As(err, &dupErr) {
-				shortURL, joinErr := url.JoinPath(srv.baseURL, dupErr.URL.Code)
-				if joinErr != nil {
-					return "", joinErr
-				}
-				return shortURL, repository.ErrURLAlreadyExists
+				return srv.shortBase + dupErr.URL.Code, repository.ErrURLAlreadyExists
 			}
 			if errors.Is(err, repository.ErrConflict) {
 				continue
@@ -112,7 +111,7 @@ func (srv URLService) Shorten(originalURL string, userID string) (string, error)
 			return "", err
 		}
 
-		return url.JoinPath(srv.baseURL, code)
+		return srv.shortBase + code, nil
 	}
 
 	return "", fmt.Errorf("failed to generate unique code after %d attempts", srv.collisionRetries)
@@ -147,14 +146,9 @@ func (srv URLService) ShortenBatch(items []model.BatchItem, userID string) ([]mo
 				UpdatedAt: now,
 			})
 
-			shortURL, err := url.JoinPath(srv.baseURL, code)
-			if err != nil {
-				return nil, err
-			}
-
 			result = append(result, model.BatchItem{
 				CorrelationID: item.CorrelationID,
-				ShortURL:      shortURL,
+				ShortURL:      srv.shortBase + code,
 			})
 		}
 

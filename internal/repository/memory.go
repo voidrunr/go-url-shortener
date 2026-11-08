@@ -8,13 +8,15 @@ import (
 )
 
 type MemoryRepository struct {
-	mutex sync.RWMutex
-	store map[string]model.URL
+	mutex      sync.RWMutex
+	store      map[string]model.URL
+	byOriginal map[string]string
 }
 
 func NewMemory() *MemoryRepository {
 	return &MemoryRepository{
-		store: make(map[string]model.URL),
+		store:      make(map[string]model.URL),
+		byOriginal: make(map[string]string),
 	}
 }
 
@@ -22,8 +24,8 @@ func (repo *MemoryRepository) Write(ctx context.Context, url model.URL) error {
 	repo.mutex.Lock()
 	defer repo.mutex.Unlock()
 
-	if existing, ok := repo.findByOriginal(url.Original); ok {
-		return &DuplicateURLError{URL: existing}
+	if code, ok := repo.byOriginal[url.Original]; ok {
+		return &DuplicateURLError{URL: repo.store[code]}
 	}
 
 	if _, ok := repo.store[url.Code]; ok {
@@ -31,6 +33,7 @@ func (repo *MemoryRepository) Write(ctx context.Context, url model.URL) error {
 	}
 
 	repo.store[url.Code] = url
+	repo.byOriginal[url.Original] = url.Code
 	return nil
 }
 
@@ -46,6 +49,7 @@ func (repo *MemoryRepository) WriteBatch(ctx context.Context, urls []model.URL) 
 
 	for _, url := range urls {
 		repo.store[url.Code] = url
+		repo.byOriginal[url.Original] = url.Code
 	}
 	return nil
 }
@@ -97,14 +101,4 @@ func (repo *MemoryRepository) DeleteBatch(ctx context.Context, userID string, co
 	}
 
 	return nil
-}
-
-func (repo *MemoryRepository) findByOriginal(original string) (model.URL, bool) {
-	for _, url := range repo.store {
-		if url.Original == original {
-			return url, true
-		}
-	}
-
-	return model.URL{}, false
 }

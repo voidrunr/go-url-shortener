@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -49,15 +51,17 @@ func fromFileEntry(e fileEntry) model.URL {
 }
 
 type FileRepository struct {
-	mutex    sync.RWMutex
-	store    map[string]model.URL
-	filePath string
+	mutex      sync.RWMutex
+	store      map[string]model.URL
+	byOriginal map[string]string
+	filePath   string
 }
 
 func NewFile(filePath string) (*FileRepository, error) {
 	repo := &FileRepository{
-		store:    make(map[string]model.URL),
-		filePath: filePath,
+		store:      make(map[string]model.URL),
+		byOriginal: make(map[string]string),
+		filePath:   filePath,
 	}
 	if err := repo.loadFromFile(); err != nil {
 		return nil, err
@@ -69,8 +73,8 @@ func (repo *FileRepository) Write(ctx context.Context, url model.URL) error {
 	repo.mutex.Lock()
 	defer repo.mutex.Unlock()
 
-	if existing, ok := repo.findByOriginal(url.Original); ok {
-		return &DuplicateURLError{URL: existing}
+	if code, ok := repo.byOriginal[url.Original]; ok {
+		return &DuplicateURLError{URL: repo.store[code]}
 	}
 
 	if _, ok := repo.store[url.Code]; ok {
@@ -78,7 +82,8 @@ func (repo *FileRepository) Write(ctx context.Context, url model.URL) error {
 	}
 
 	repo.store[url.Code] = url
-	return repo.saveToFile()
+	repo.byOriginal[url.Original] = url.Code
+	return repo.appendEntries([]fileEntry{toFileEntry(url)})
 }
 
 func (repo *FileRepository) WriteBatch(ctx context.Context, urls []model.URL) error {
@@ -91,10 +96,13 @@ func (repo *FileRepository) WriteBatch(ctx context.Context, urls []model.URL) er
 		}
 	}
 
+	entries := make([]fileEntry, 0, len(urls))
 	for _, url := range urls {
 		repo.store[url.Code] = url
+		repo.byOriginal[url.Original] = url.Code
+		entries = append(entries, toFileEntry(url))
 	}
-	return repo.saveToFile()
+	return repo.appendEntries(entries)
 }
 
 func (repo *FileRepository) Delete(ctx context.Context, url model.URL) error {
@@ -102,7 +110,10 @@ func (repo *FileRepository) Delete(ctx context.Context, url model.URL) error {
 	defer repo.mutex.Unlock()
 
 	delete(repo.store, url.Code)
-	return repo.saveToFile()
+	if code, ok := repo.byOriginal[url.Original]; ok && code == url.Code {
+		delete(repo.byOriginal, url.Original)
+	}
+	return repo.rewrite()
 }
 
 func (repo *FileRepository) Get(ctx context.Context, code string) (model.URL, error) {
@@ -141,7 +152,7 @@ func (repo *FileRepository) DeleteBatch(ctx context.Context, userID string, code
 		wanted[code] = struct{}{}
 	}
 
-	changed := false
+	var tombstones []fileEntry
 	for code, url := range repo.store {
 		if url.UserID != userID {
 			continue
@@ -149,27 +160,36 @@ func (repo *FileRepository) DeleteBatch(ctx context.Context, userID string, code
 		if _, ok := wanted[code]; ok {
 			url.Deleted = true
 			repo.store[code] = url
-			changed = true
+			tombstones = append(tombstones, fileEntry{Code: code, Deleted: true})
 		}
 	}
 
-	if !changed {
+	if len(tombstones) == 0 {
 		return nil
 	}
-	return repo.saveToFile()
+	return repo.appendEntries(tombstones)
 }
 
-func (repo *FileRepository) findByOriginal(original string) (model.URL, bool) {
-	for _, url := range repo.store {
-		if url.Original == original {
-			return url, true
+func (repo *FileRepository) appendEntries(entries []fileEntry) error {
+	fh, err := os.OpenFile(repo.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return err
+	}
+	defer fh.Close()
+
+	for _, e := range entries {
+		data, err := json.Marshal(e)
+		if err != nil {
+			return err
+		}
+		if _, err := fh.Write(append(data, '\n')); err != nil {
+			return err
 		}
 	}
-
-	return model.URL{}, false
+	return nil
 }
 
-func (repo *FileRepository) saveToFile() error {
+func (repo *FileRepository) rewrite() error {
 	entries := make([]fileEntry, 0, len(repo.store))
 	for _, url := range repo.store {
 		entries = append(entries, toFileEntry(url))
@@ -180,7 +200,21 @@ func (repo *FileRepository) saveToFile() error {
 		return err
 	}
 
-	return os.WriteFile(repo.filePath, data, 0644)
+	return os.WriteFile(repo.filePath, data, 0o644)
+}
+
+func (repo *FileRepository) applyEntry(e fileEntry) {
+	if existing, ok := repo.store[e.Code]; ok && e.Deleted {
+		existing.Deleted = true
+		repo.store[e.Code] = existing
+		return
+	}
+
+	url := fromFileEntry(e)
+	if !e.Deleted {
+		repo.byOriginal[url.Original] = url.Code
+	}
+	repo.store[url.Code] = url
 }
 
 func (repo *FileRepository) loadFromFile() error {
@@ -192,14 +226,33 @@ func (repo *FileRepository) loadFromFile() error {
 		return err
 	}
 
-	var entries []fileEntry
-	if err := json.Unmarshal(data, &entries); err != nil {
-		return err
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) == 0 {
+		return nil
 	}
 
-	for _, e := range entries {
-		url := fromFileEntry(e)
-		repo.store[url.Code] = url
+	if trimmed[0] == '[' {
+		var entries []fileEntry
+		if err := json.Unmarshal(data, &entries); err != nil {
+			return err
+		}
+		for _, e := range entries {
+			repo.applyEntry(e)
+		}
+		return nil
 	}
-	return nil
+
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+		var e fileEntry
+		if err := json.Unmarshal(line, &e); err != nil {
+			return err
+		}
+		repo.applyEntry(e)
+	}
+	return scanner.Err()
 }
