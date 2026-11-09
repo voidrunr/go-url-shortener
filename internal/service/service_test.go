@@ -16,18 +16,18 @@ import (
 )
 
 type stubRepo struct {
-	mutex            sync.RWMutex
+	writeErr         error
+	batchErr         error
+	getErr           error
+	deleteErr        error
 	urls             map[string]model.URL
 	writeCalls       int
 	conflicts        int
 	batchWriteCalls  int
 	conflictOnWrite  int
-	duplicate        bool
-	writeErr         error
-	batchErr         error
-	getErr           error
-	deleteErr        error
 	deleteBatchCalls int
+	mutex            sync.RWMutex
+	duplicate        bool
 }
 
 func newStubRepo() *stubRepo {
@@ -265,8 +265,8 @@ func TestDelete_MarksOwnedURLsAsGone(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Eventually(t, func() bool {
-		_, err := svc.Resolve(codeA1)
-		return errors.Is(err, repository.ErrGone)
+		_, rerr := svc.Resolve(codeA1)
+		return errors.Is(rerr, repository.ErrGone)
 	}, 2*time.Second, 10*time.Millisecond)
 
 	_, err = svc.Resolve(codeA2)
@@ -449,7 +449,7 @@ func TestDeleterDropsWhenQueueAndSemSaturated(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		for i := 0; i < defaultBacklogLimit+1; i++ {
+		for range defaultBacklogLimit + 1 {
 			d.enqueue(deleteRequest{userID: "user-a", codes: []string{"c1"}})
 		}
 		close(done)

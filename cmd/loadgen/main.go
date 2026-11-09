@@ -8,10 +8,12 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/rs/zerolog/log"
 )
 
 var (
@@ -22,10 +24,10 @@ var (
 )
 
 type stats struct {
-	mu     sync.Mutex
-	lat    []time.Duration
 	status map[int]int
-	err    int64
+	lat    []time.Duration
+	err    atomic.Int64
+	mu     sync.Mutex
 }
 
 func (s *stats) add(lat time.Duration, code int) {
@@ -35,13 +37,12 @@ func (s *stats) add(lat time.Duration, code int) {
 	s.mu.Unlock()
 }
 
-func (s *stats) addErr() { atomic.AddInt64(&s.err, 1) }
+func (s *stats) addErr() { s.err.Add(1) }
 
-func readURLs(path string) []string {
+func readURLs(path string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "open data:", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("open data: %w", err)
 	}
 	defer f.Close()
 
@@ -54,10 +55,9 @@ func readURLs(path string) []string {
 		}
 	}
 	if err := sc.Err(); err != nil {
-		fmt.Fprintln(os.Stderr, "read data:", err)
-		os.Exit(1)
+		return nil, fmt.Errorf("read data: %w", err)
 	}
-	return urls
+	return urls, nil
 }
 
 func client(n int) *http.Client {
@@ -120,7 +120,7 @@ func run(do *http.Client, urls, codes []string) {
 	deadline := time.NewTimer(*duration)
 	defer deadline.Stop()
 
-	var seq int64
+	var seq atomic.Int64
 	var st stats
 	st.status = map[int]int{}
 
@@ -133,7 +133,7 @@ func run(do *http.Client, urls, codes []string) {
 				default:
 				}
 
-				n := atomic.AddInt64(&seq, 1)
+				n := seq.Add(1)
 				beg := time.Now()
 				var resp *http.Response
 				var err error
@@ -159,7 +159,7 @@ func run(do *http.Client, urls, codes []string) {
 	elapsed := time.Since(start)
 
 	st.mu.Lock()
-	sort.Slice(st.lat, func(i, j int) bool { return st.lat[i] < st.lat[j] })
+	slices.Sort(st.lat)
 	total := len(st.lat)
 	var codes2xx, codes3xx int
 	for code, count := range st.status {
@@ -170,7 +170,7 @@ func run(do *http.Client, urls, codes []string) {
 			codes3xx += count
 		}
 	}
-	errcount := int(atomic.LoadInt64(&st.err))
+	errcount := int(st.err.Load())
 	st.mu.Unlock()
 
 	fmt.Println("Summary:")
@@ -185,13 +185,15 @@ func run(do *http.Client, urls, codes []string) {
 func main() {
 	flag.Parse()
 
-	urls := readURLs(*data)
+	urls, err := readURLs(*data)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to read input data")
+	}
 	do := client(*workers)
 
 	resp, err := do.Get(*base + "/ping")
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "shortener unreachable:", err)
-		os.Exit(1)
+		log.Fatal().Err(err).Msg("shortener unreachable")
 	}
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
@@ -201,8 +203,7 @@ func main() {
 	codes := seed(do, urls)
 	fmt.Printf("seeded %d short links in %s\n", len(codes), time.Since(seedStart))
 	if len(codes) == 0 {
-		fmt.Fprintln(os.Stderr, "no short links produced")
-		os.Exit(1)
+		log.Fatal().Msg("no short links produced")
 	}
 	fmt.Printf("sample short URL: %s\n", codes[0])
 

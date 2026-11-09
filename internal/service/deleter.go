@@ -21,10 +21,10 @@ type deleter struct {
 	repo          Repository
 	queue         chan deleteRequest
 	sem           chan struct{}
+	done          chan struct{}
 	buffer        []deleteRequest
 	flushInterval time.Duration
 	bufferLimit   int
-	done          chan struct{}
 }
 
 func newDeleter(repo Repository, flushInterval time.Duration, queueSize int, bufferLimit int) *deleter {

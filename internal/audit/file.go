@@ -11,10 +11,10 @@ import (
 // The file is opened lazily on the first Write and kept open between writes.
 // Each event is encoded and written in one call; no bufio layer is used.
 type FileSink struct {
-	mu     sync.Mutex
-	path   string
 	file   *os.File
 	enc    *json.Encoder
+	path   string
+	mu     sync.Mutex
 	closed bool
 }
 

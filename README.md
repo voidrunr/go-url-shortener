@@ -31,6 +31,18 @@ git fetch template && git checkout template/v2 .github
 
 Подробнее про локальный и автоматический запуск читайте в [README автотестов](https://github.com/Yandex-Practicum/go-autotests).
 
+## Статический анализ
+
+Проект проверяется собственным multichecker'ом `cmd/staticlint`: стандартные анализаторы `golang.org/x/tools/go/analysis/passes`, все проверки SA из staticcheck.io, `unused` (U1000), сторонние `bodyclose` и `nilerr`, а также собственный анализатор `exitcheck`, запрещающий прямой вызов `os.Exit` в `main` пакета `main`.
+
+```bash
+make staticlint            # go run ./cmd/staticlint ./...
+go run ./cmd/staticlint -v ./internal/handler   # только один пакет
+go doc ./cmd/staticlint    # полное описание запуска и каждого анализатора
+```
+
+Отключить конкретную проверку можно флагом `-имя.enable=false`, например `-fieldalignment.enable=false`. Код проекта проходит все проверки; тесты анализатора `exitcheck` лежат в `cmd/staticlint/exitcheck`.
+
 ## Структура проекта
 
 Приведённая в этом репозитории структура проекта является рекомендуемой, но не обязательной.

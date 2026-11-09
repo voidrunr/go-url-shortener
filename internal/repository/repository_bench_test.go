@@ -100,7 +100,7 @@ func BenchmarkFileRepositoryRead(b *testing.B) {
 		b.Fatal(err)
 	}
 	ctx := context.Background()
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		if err := repo.Write(ctx, model.URL{
 			UUID:      "uuid",
 			Original:  fmt.Sprintf("https://example.com/%d", i),

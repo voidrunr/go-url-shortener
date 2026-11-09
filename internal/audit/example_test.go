@@ -46,15 +46,17 @@ func ExampleNewFileSink() {
 	path := filepath.Join(dir, "audit.log")
 	sink := audit.NewFileSink(path)
 
-	if err := sink.Write(audit.Event{
+	err = sink.Write(audit.Event{
 		TS:     1,
 		Action: audit.ActionShorten,
 		UserID: "user-1",
 		URL:    "https://example.com",
-	}); err != nil {
+	})
+	if err != nil {
 		panic(err)
 	}
-	if err := sink.Close(); err != nil {
+	err = sink.Close()
+	if err != nil {
 		panic(err)
 	}
 
@@ -64,7 +66,7 @@ func ExampleNewFileSink() {
 	}
 	fmt.Print(string(data))
 	// Output:
-	// {"ts":1,"action":"shorten","user_id":"user-1","url":"https://example.com"}
+	// {"action":"shorten","user_id":"user-1","url":"https://example.com","ts":1}
 }
 
 func ExampleNewHTTPSink() {

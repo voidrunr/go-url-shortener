@@ -71,7 +71,7 @@ func TestEmitterCloseDrainsQueue(t *testing.T) {
 	e.Subscribe(rec)
 
 	const events = 100
-	for i := 0; i < events; i++ {
+	for i := range events {
 		e.Notify(Event{TS: int64(i), Action: ActionShorten})
 	}
 	closeEmitter(t, e)
@@ -233,15 +233,13 @@ func TestEmitterConcurrentSubscribeNotify(t *testing.T) {
 	e := NewEmitter()
 
 	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 8 {
+		wg.Go(func() {
 			sink := &recorder{}
 			e.Subscribe(sink)
 			e.Notify(Event{Action: ActionShorten})
 			e.Unsubscribe(sink)
-		}()
+		})
 	}
 	wg.Wait()
 	closeEmitter(t, e)

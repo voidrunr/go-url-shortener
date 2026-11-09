@@ -69,12 +69,12 @@ func WithAudit(e *audit.Emitter) Option {
 }
 
 type URLHandler struct {
+	logger  zerolog.Logger
 	svc     Shortener
 	pinger  Pinger
 	auth    *auth.Signer
-	baseURL string
-	logger  zerolog.Logger
 	audit   *audit.Emitter
+	baseURL string
 }
 
 func New(svc Shortener, opts ...Option) *URLHandler {

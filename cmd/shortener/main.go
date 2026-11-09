@@ -44,8 +44,8 @@ func main() {
 
 	emitter := audit.NewEmitter()
 	defer func() {
-		if err := emitter.Close(); err != nil {
-			log.Error().Err(err).Msg("failed to close audit emitter")
+		if closeErr := emitter.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msg("failed to close audit emitter")
 		}
 	}()
 	if cfg.AuditFile != "" {
@@ -71,8 +71,8 @@ func main() {
 	if cfg.PprofAddress != "" {
 		go func() {
 			log.Info().Str("address", cfg.PprofAddress).Msg("pprof server")
-			if err := http.ListenAndServe(cfg.PprofAddress, nil); err != nil {
-				log.Error().Err(err).Msg("pprof server error")
+			if listenErr := http.ListenAndServe(cfg.PprofAddress, nil); listenErr != nil {
+				log.Error().Err(listenErr).Msg("pprof server error")
 			}
 		}()
 	}

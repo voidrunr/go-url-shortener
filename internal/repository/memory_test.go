@@ -30,10 +30,10 @@ func TestMemoryRepository(t *testing.T) {
 	})
 
 	t.Run("duplicate original returns DuplicateURLError", func(t *testing.T) {
-		repo := NewMemory()
-		require.NoError(t, repo.Write(context.Background(), testURL("abc123", "https://example.com")))
+		fresh := NewMemory()
+		require.NoError(t, fresh.Write(context.Background(), testURL("abc123", "https://example.com")))
 
-		err := repo.Write(context.Background(), testURL("xyz789", "https://example.com"))
+		err := fresh.Write(context.Background(), testURL("xyz789", "https://example.com"))
 		var dupErr *DuplicateURLError
 		require.ErrorAs(t, err, &dupErr)
 		assert.ErrorIs(t, err, ErrURLAlreadyExists)
@@ -41,26 +41,26 @@ func TestMemoryRepository(t *testing.T) {
 	})
 
 	t.Run("batch write", func(t *testing.T) {
-		repo := NewMemory()
+		fresh := NewMemory()
 		u1 := testURL("b1", "https://one.example")
 		u2 := testURL("b2", "https://two.example")
 
-		require.NoError(t, repo.WriteBatch(context.Background(), []model.URL{u1, u2}))
+		require.NoError(t, fresh.WriteBatch(context.Background(), []model.URL{u1, u2}))
 
-		got1, err := repo.Get(context.Background(), "b1")
+		got1, err := fresh.Get(context.Background(), "b1")
 		require.NoError(t, err)
 		assert.Equal(t, u1.Original, got1.Original)
 
-		got2, err := repo.Get(context.Background(), "b2")
+		got2, err := fresh.Get(context.Background(), "b2")
 		require.NoError(t, err)
 		assert.Equal(t, u2.Original, got2.Original)
 	})
 
 	t.Run("batch write conflict writes nothing", func(t *testing.T) {
-		repo := NewMemory()
-		require.NoError(t, repo.Write(context.Background(), testURL("b1", "https://one.example")))
+		fresh := NewMemory()
+		require.NoError(t, fresh.Write(context.Background(), testURL("b1", "https://one.example")))
 
-		err := repo.WriteBatch(context.Background(), []model.URL{
+		err := fresh.WriteBatch(context.Background(), []model.URL{
 			testURL("b2", "https://two.example"),
 			testURL("b1", "https://conflict.example"),
 		})

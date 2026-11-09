@@ -15,10 +15,10 @@ import (
 type logEntry struct {
 	URI      string  `json:"uri"`
 	Method   string  `json:"method"`
+	Msg      string  `json:"message"`
 	Status   int     `json:"status"`
 	Size     int     `json:"size"`
 	Duration float64 `json:"duration"`
-	Msg      string  `json:"message"`
 }
 
 func captureLogs(t *testing.T, next http.Handler, method, target string) logEntry {
