@@ -3,11 +3,13 @@ package main
 import (
 	"database/sql"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
+	"github.com/voidrunr/go-url-shortener/internal/audit"
 	"github.com/voidrunr/go-url-shortener/internal/auth"
 	"github.com/voidrunr/go-url-shortener/internal/config"
 	"github.com/voidrunr/go-url-shortener/internal/database"
@@ -40,10 +42,24 @@ func main() {
 
 	svc := service.New(repo, cfg.BaseURL, cfg.CollisionRetries)
 
+	emitter := audit.NewEmitter()
+	defer func() {
+		if closeErr := emitter.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msg("failed to close audit emitter")
+		}
+	}()
+	if cfg.AuditFile != "" {
+		emitter.Subscribe(audit.NewFileSink(cfg.AuditFile))
+	}
+	if cfg.AuditURL != "" {
+		emitter.Subscribe(audit.NewHTTPSink(cfg.AuditURL))
+	}
+
 	opts := []handler.Option{
 		handler.WithAuth(signer),
 		handler.WithBaseURL(cfg.BaseURL),
 		handler.WithLogger(log.Logger),
+		handler.WithAudit(emitter),
 	}
 	if db != nil {
 		opts = append(opts, handler.WithPinger(db))
@@ -51,6 +67,15 @@ func main() {
 	hlr := handler.New(svc, opts...)
 
 	log.Info().Str("address", cfg.ServerAddress).Msg("serving")
+
+	if cfg.PprofAddress != "" {
+		go func() {
+			log.Info().Str("address", cfg.PprofAddress).Msg("pprof server")
+			if listenErr := http.ListenAndServe(cfg.PprofAddress, nil); listenErr != nil {
+				log.Error().Err(listenErr).Msg("pprof server error")
+			}
+		}()
+	}
 
 	err = http.ListenAndServe(cfg.ServerAddress, hlr.Router())
 	if err != nil {

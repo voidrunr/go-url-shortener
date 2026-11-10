@@ -10,10 +10,13 @@ import (
 type Config struct {
 	ServerAddress    string
 	BaseURL          string
-	CollisionRetries int
 	FileStoragePath  string
 	DatabaseDSN      string
 	SecretKey        string
+	AuditFile        string
+	AuditURL         string
+	PprofAddress     string
+	CollisionRetries int
 	TokenTTL         time.Duration
 }
 
@@ -27,6 +30,9 @@ func Parse() (Config, error) {
 	flag.StringVar(&cfg.DatabaseDSN, "d", "", "database DSN")
 	flag.StringVar(&cfg.SecretKey, "secret-key", "ChangeThisStringImportant", "secret key for signing auth cookies")
 	flag.DurationVar(&cfg.TokenTTL, "token-ttl", 24*time.Hour, "auth token lifetime")
+	flag.StringVar(&cfg.AuditFile, "audit-file", "", "path to file sink for audit events")
+	flag.StringVar(&cfg.AuditURL, "audit-url", "", "URL of remote sink for audit events")
+	flag.StringVar(&cfg.PprofAddress, "pprof-address", "", "address for the pprof debug server (empty = disabled)")
 	flag.Parse()
 
 	env := map[string]*string{
@@ -35,6 +41,9 @@ func Parse() (Config, error) {
 		"FILE_STORAGE_PATH": &cfg.FileStoragePath,
 		"DATABASE_DSN":      &cfg.DatabaseDSN,
 		"SECRET_KEY":        &cfg.SecretKey,
+		"AUDIT_FILE":        &cfg.AuditFile,
+		"AUDIT_URL":         &cfg.AuditURL,
+		"PPROF_ADDRESS":     &cfg.PprofAddress,
 	}
 	for name, target := range env {
 		if val := os.Getenv(name); val != "" {

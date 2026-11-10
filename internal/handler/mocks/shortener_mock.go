@@ -58,7 +58,7 @@ type Shortener_Resolve_Call struct {
 
 // Resolve is a helper method to define mock.On call
 //   - _a0 string
-func (_e *Shortener_Expecter) Resolve(_a0 interface{}) *Shortener_Resolve_Call {
+func (_e *Shortener_Expecter) Resolve(_a0 any) *Shortener_Resolve_Call {
 	return &Shortener_Resolve_Call{Call: _e.mock.On("Resolve", _a0)}
 }
 
@@ -115,7 +115,7 @@ type Shortener_Shorten_Call struct {
 // Shorten is a helper method to define mock.On call
 //   - _a0 string
 //   - _a1 string
-func (_e *Shortener_Expecter) Shorten(_a0 interface{}, _a1 interface{}) *Shortener_Shorten_Call {
+func (_e *Shortener_Expecter) Shorten(_a0 any, _a1 any) *Shortener_Shorten_Call {
 	return &Shortener_Shorten_Call{Call: _e.mock.On("Shorten", _a0, _a1)}
 }
 
@@ -174,7 +174,7 @@ type Shortener_ShortenBatch_Call struct {
 // ShortenBatch is a helper method to define mock.On call
 //   - _a0 []model.BatchItem
 //   - _a1 string
-func (_e *Shortener_Expecter) ShortenBatch(_a0 interface{}, _a1 interface{}) *Shortener_ShortenBatch_Call {
+func (_e *Shortener_Expecter) ShortenBatch(_a0 any, _a1 any) *Shortener_ShortenBatch_Call {
 	return &Shortener_ShortenBatch_Call{Call: _e.mock.On("ShortenBatch", _a0, _a1)}
 }
 
@@ -233,7 +233,7 @@ type Shortener_ListByUser_Call struct {
 // ListByUser is a helper method to define mock.On call
 //   - _a0 context.Context
 //   - _a1 string
-func (_e *Shortener_Expecter) ListByUser(_a0 interface{}, _a1 interface{}) *Shortener_ListByUser_Call {
+func (_e *Shortener_Expecter) ListByUser(_a0 any, _a1 any) *Shortener_ListByUser_Call {
 	return &Shortener_ListByUser_Call{Call: _e.mock.On("ListByUser", _a0, _a1)}
 }
 
@@ -280,7 +280,7 @@ type Shortener_Delete_Call struct {
 // Delete is a helper method to define mock.On call
 //   - _a0 string
 //   - _a1 []string
-func (_e *Shortener_Expecter) Delete(_a0 interface{}, _a1 interface{}) *Shortener_Delete_Call {
+func (_e *Shortener_Expecter) Delete(_a0 any, _a1 any) *Shortener_Delete_Call {
 	return &Shortener_Delete_Call{Call: _e.mock.On("Delete", _a0, _a1)}
 }
 
