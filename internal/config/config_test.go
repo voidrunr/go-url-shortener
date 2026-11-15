@@ -24,6 +24,7 @@ func clearEnv(t *testing.T) {
 	for _, name := range []string{
 		"SERVER_ADDRESS", "BASE_URL", "FILE_STORAGE_PATH", "DATABASE_DSN",
 		"SECRET_KEY", "TOKEN_TTL", "AUDIT_FILE", "AUDIT_URL", "PPROF_ADDRESS",
+		"ENABLE_HTTPS",
 	} {
 		t.Setenv(name, "")
 	}
@@ -52,6 +53,9 @@ func TestParseDefaults(t *testing.T) {
 	}
 	if cfg.SecretKey != "ChangeThisStringImportant" {
 		t.Errorf("SecretKey = %q, want default", cfg.SecretKey)
+	}
+	if cfg.EnableHTTPS {
+		t.Error("EnableHTTPS = true, want false by default")
 	}
 }
 
@@ -180,5 +184,117 @@ func TestParseInvalidTokenTTL(t *testing.T) {
 
 	if _, err := Parse(); err == nil {
 		t.Fatal("Parse() error = nil, want error for invalid TOKEN_TTL")
+	}
+}
+
+func TestParseEnableHTTPSFlag(t *testing.T) {
+	resetFlags(t)
+	clearEnv(t)
+
+	os.Args = []string{"testsrv", "-s"}
+
+	cfg, err := Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if !cfg.EnableHTTPS {
+		t.Error("EnableHTTPS = false, want true with -s flag")
+	}
+	if cfg.BaseURL != "https://localhost:8080" {
+		t.Errorf("BaseURL = %q, want https://localhost:8080 when HTTPS is enabled", cfg.BaseURL)
+	}
+}
+
+func TestParseEnableHTTPSEnv(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		want  bool
+	}{
+		{"true", "true", true},
+		{"one", "1", true},
+		{"false", "false", false},
+		{"zero", "0", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resetFlags(t)
+
+			t.Setenv("ENABLE_HTTPS", tc.value)
+
+			cfg, err := Parse()
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+
+			if cfg.EnableHTTPS != tc.want {
+				t.Errorf("EnableHTTPS = %v, want %v for ENABLE_HTTPS=%q", cfg.EnableHTTPS, tc.want, tc.value)
+			}
+		})
+	}
+}
+
+func TestParseEnvOverridesEnableHTTPSFlag(t *testing.T) {
+	resetFlags(t)
+
+	os.Args = []string{"testsrv", "-s"}
+	t.Setenv("ENABLE_HTTPS", "false")
+
+	cfg, err := Parse()
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if cfg.EnableHTTPS {
+		t.Error("EnableHTTPS = true, env must override flag")
+	}
+}
+
+func TestParseInvalidEnableHTTPS(t *testing.T) {
+	resetFlags(t)
+
+	t.Setenv("ENABLE_HTTPS", "garbage")
+
+	if _, err := Parse(); err == nil {
+		t.Fatal("Parse() error = nil, want error for invalid ENABLE_HTTPS")
+	}
+}
+
+func TestParseHTTPSBaseURLSchemes(t *testing.T) {
+	cases := []struct {
+		name    string
+		https   bool
+		baseURL string
+		want    string
+	}{
+		{"default without https", false, "", "http://localhost:8080"},
+		{"explicit http with https", true, "http://short.example", "https://short.example"},
+		{"explicit https with https", true, "https://short.example", "https://short.example"},
+		{"explicit http without https", false, "http://short.example", "http://short.example"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resetFlags(t)
+			clearEnv(t)
+
+			args := []string{"testsrv"}
+			if tc.https {
+				args = append(args, "-s")
+			}
+			if tc.baseURL != "" {
+				args = append(args, "-b", tc.baseURL)
+			}
+			os.Args = args
+
+			cfg, err := Parse()
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+
+			if cfg.BaseURL != tc.want {
+				t.Errorf("BaseURL = %q, want %q", cfg.BaseURL, tc.want)
+			}
+		})
 	}
 }

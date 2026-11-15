@@ -4,6 +4,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -18,6 +20,7 @@ type Config struct {
 	PprofAddress     string
 	CollisionRetries int
 	TokenTTL         time.Duration
+	EnableHTTPS      bool
 }
 
 func Parse() (Config, error) {
@@ -33,6 +36,7 @@ func Parse() (Config, error) {
 	flag.StringVar(&cfg.AuditFile, "audit-file", "", "path to file sink for audit events")
 	flag.StringVar(&cfg.AuditURL, "audit-url", "", "URL of remote sink for audit events")
 	flag.StringVar(&cfg.PprofAddress, "pprof-address", "", "address for the pprof debug server (empty = disabled)")
+	flag.BoolVar(&cfg.EnableHTTPS, "s", false, "enable HTTPS with an in-memory self-signed certificate")
 	flag.Parse()
 
 	env := map[string]*string{
@@ -57,6 +61,18 @@ func Parse() (Config, error) {
 			return cfg, fmt.Errorf("parse TOKEN_TTL %q: %w", val, err)
 		}
 		cfg.TokenTTL = ttl
+	}
+
+	if val := os.Getenv("ENABLE_HTTPS"); val != "" {
+		enabled, err := strconv.ParseBool(val)
+		if err != nil {
+			return cfg, fmt.Errorf("parse ENABLE_HTTPS %q: %w", val, err)
+		}
+		cfg.EnableHTTPS = enabled
+	}
+
+	if cfg.EnableHTTPS {
+		cfg.BaseURL = strings.Replace(cfg.BaseURL, "http://", "https://", 1)
 	}
 
 	return cfg, nil

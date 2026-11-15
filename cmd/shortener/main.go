@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"database/sql"
 	"fmt"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	"github.com/voidrunr/go-url-shortener/internal/handler"
 	"github.com/voidrunr/go-url-shortener/internal/repository"
 	"github.com/voidrunr/go-url-shortener/internal/service"
+	"github.com/voidrunr/go-url-shortener/internal/tlscert"
 )
 
 var buildVersion string
@@ -86,9 +88,29 @@ func main() {
 		}()
 	}
 
-	err = http.ListenAndServe(cfg.ServerAddress, hlr.Router())
-	if err != nil {
-		log.Fatal().Err(err).Msg("server error")
+	if cfg.EnableHTTPS {
+		cert, err := tlscert.SelfSignedCertificate()
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to generate self-signed certificate")
+		}
+
+		srv := &http.Server{
+			Addr:    cfg.ServerAddress,
+			Handler: hlr.Router(),
+			TLSConfig: &tls.Config{
+				Certificates: []tls.Certificate{cert},
+			},
+		}
+
+		log.Info().Str("address", cfg.ServerAddress).Msg("serving https")
+
+		if err := srv.ListenAndServeTLS("", ""); err != nil {
+			log.Fatal().Err(err).Msg("server error")
+		}
+	} else {
+		if err := http.ListenAndServe(cfg.ServerAddress, hlr.Router()); err != nil {
+			log.Fatal().Err(err).Msg("server error")
+		}
 	}
 }
 
