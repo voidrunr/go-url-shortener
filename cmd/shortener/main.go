@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -19,7 +20,15 @@ import (
 	"github.com/voidrunr/go-url-shortener/internal/service"
 )
 
+var buildVersion string
+var buildDate string
+var buildCommit string
+
 func main() {
+	fmt.Printf("Build version: %s\n", orNA(buildVersion))
+	fmt.Printf("Build date: %s\n", orNA(buildDate))
+	fmt.Printf("Build commit: %s\n", orNA(buildCommit))
+
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
 
 	cfg, err := config.Parse()
@@ -108,4 +117,11 @@ func buildRepository(cfg config.Config) (repository.Repository, *sql.DB, error) 
 	default:
 		return repository.NewMemory(), nil, nil
 	}
+}
+
+func orNA(v string) string {
+	if v == "" {
+		return "N/A"
+	}
+	return v
 }
