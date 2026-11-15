@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,7 @@ import (
 	"github.com/voidrunr/go-url-shortener/internal/auth"
 	"github.com/voidrunr/go-url-shortener/internal/middleware"
 	"github.com/voidrunr/go-url-shortener/internal/model"
+	"github.com/voidrunr/go-url-shortener/internal/pool"
 	"github.com/voidrunr/go-url-shortener/internal/repository"
 )
 
@@ -140,14 +142,32 @@ func (hlr *URLHandler) handleEmptyCode(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 }
 
+// bodyPool recycles bytes.Buffers used to read request bodies; their
+// capacity survives across requests, so io.ReadAll's growing reallocation
+// happens once per buffer, not once per request.
+var bodyPool = pool.New(func() *bytes.Buffer {
+	return new(bytes.Buffer)
+})
+
+// readBody reads the whole body into a pooled buffer and returns the
+// trimmed copy as a string. The buffer is handed back to the pool
+// before the handler proceeds, since String() already made its copy.
+func readBody(r io.Reader) string {
+	buf := bodyPool.Get()
+	defer bodyPool.Put(buf)
+	buf.Reset()
+	io.Copy(buf, r)
+	return buf.String()
+}
+
 func (hlr *URLHandler) handleShorten(w http.ResponseWriter, r *http.Request) {
-	body, err := io.ReadAll(r.Body)
-	if err != nil || len(strings.TrimSpace(string(body))) == 0 {
+	body := readBody(r.Body)
+	if len(strings.TrimSpace(body)) == 0 {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return
 	}
 
-	originalURL := strings.TrimSpace(string(body))
+	originalURL := strings.TrimSpace(body)
 	userID := auth.UserIDFromContext(r.Context())
 	shortURL, err := hlr.svc.Shorten(originalURL, userID)
 	if err != nil {
