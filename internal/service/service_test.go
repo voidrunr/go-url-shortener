@@ -16,13 +16,18 @@ import (
 )
 
 type stubRepo struct {
-	mutex           sync.RWMutex
-	urls            map[string]model.URL
-	writeCalls      int
-	conflicts       int
-	batchWriteCalls int
-	conflictOnWrite int
-	duplicate       bool
+	mutex            sync.RWMutex
+	urls             map[string]model.URL
+	writeCalls       int
+	conflicts        int
+	batchWriteCalls  int
+	conflictOnWrite  int
+	duplicate        bool
+	writeErr         error
+	batchErr         error
+	getErr           error
+	deleteErr        error
+	deleteBatchCalls int
 }
 
 func newStubRepo() *stubRepo {
@@ -34,6 +39,9 @@ func (r *stubRepo) Write(ctx context.Context, url model.URL) error {
 	defer r.mutex.Unlock()
 
 	r.writeCalls++
+	if r.writeErr != nil {
+		return r.writeErr
+	}
 	if r.conflictOnWrite > 0 {
 		r.conflictOnWrite--
 		return repository.ErrConflict
@@ -57,6 +65,9 @@ func (r *stubRepo) WriteBatch(ctx context.Context, urls []model.URL) error {
 	_ = ctx
 
 	r.batchWriteCalls++
+	if r.batchErr != nil {
+		return r.batchErr
+	}
 	if r.duplicate {
 		return &repository.DuplicateURLError{URL: model.URL{Code: "existing", Original: urls[0].Original}}
 	}
@@ -89,6 +100,9 @@ func (r *stubRepo) Get(ctx context.Context, code string) (model.URL, error) {
 	defer r.mutex.RUnlock()
 
 	_ = ctx
+	if r.getErr != nil {
+		return model.URL{}, r.getErr
+	}
 	u, ok := r.urls[code]
 	if !ok {
 		return model.URL{}, repository.ErrNotFound
@@ -112,6 +126,11 @@ func (r *stubRepo) GetByUser(ctx context.Context, userID string) ([]model.URL, e
 func (r *stubRepo) DeleteBatch(ctx context.Context, userID string, codes []string) error {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
+
+	r.deleteBatchCalls++
+	if r.deleteErr != nil {
+		return r.deleteErr
+	}
 
 	wanted := make(map[string]struct{}, len(codes))
 	for _, c := range codes {
@@ -342,4 +361,143 @@ func TestDeleterFlushesWhenBufferFull(t *testing.T) {
 
 	_, err := svc.Resolve(codes[1])
 	require.ErrorIs(t, err, repository.ErrGone)
+}
+
+func TestResolve_RepositoryError(t *testing.T) {
+	repo := newStubRepo()
+	repo.getErr = errors.New("connection reset")
+	svc := New(repo, "http://localhost:8080", 5)
+
+	_, err := svc.Resolve("anything")
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "connection reset")
+	assert.NotErrorIs(t, err, repository.ErrNotFound)
+}
+
+func TestShorten_RepositoryWriteError(t *testing.T) {
+	repo := newStubRepo()
+	repo.writeErr = errors.New("disk full")
+	svc := New(repo, "http://localhost:8080", 5)
+
+	_, err := svc.Shorten("https://example.com", "user-1")
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "disk full")
+}
+
+func TestShorten_RetriesExhausted(t *testing.T) {
+	repo := newStubRepo()
+	repo.conflictOnWrite = 100
+	svc := New(repo, "http://localhost:8080", 2)
+
+	_, err := svc.Shorten("https://example.com", "user-1")
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "failed to generate unique code after 2 attempts")
+	assert.Equal(t, 2, repo.writeCalls)
+}
+
+func TestShorten_UnlimitedRetriesWhenRetriesNonPositive(t *testing.T) {
+	repo := newStubRepo()
+	repo.conflictOnWrite = 1
+	svc := New(repo, "http://localhost:8080", 0)
+
+	shortURL, err := svc.Shorten("https://example.com", "user-1")
+	require.NoError(t, err)
+	assert.True(t, strings.HasPrefix(shortURL, "http://localhost:8080/"))
+	assert.Equal(t, 2, repo.writeCalls)
+}
+
+func TestShortenBatch_RepositoryWriteError(t *testing.T) {
+	repo := newStubRepo()
+	repo.batchErr = errors.New("disk full")
+	svc := New(repo, "http://localhost:8080", 5)
+
+	_, err := svc.ShortenBatch([]model.BatchItem{
+		{CorrelationID: "1", OriginalURL: "https://one.example"},
+	}, "user-1")
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "disk full")
+}
+
+func TestShortenBatch_RetriesExhausted(t *testing.T) {
+	repo := newStubRepo()
+	repo.conflicts = 100
+	svc := New(repo, "http://localhost:8080", 2)
+
+	_, err := svc.ShortenBatch([]model.BatchItem{
+		{CorrelationID: "1", OriginalURL: "https://one.example"},
+	}, "user-1")
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "failed to generate unique codes after 2 attempts")
+	assert.Equal(t, 2, repo.batchWriteCalls)
+}
+
+func TestShortenBatch_UnlimitedRetriesWhenRetriesNonPositive(t *testing.T) {
+	repo := newStubRepo()
+	repo.conflicts = 1
+	svc := New(repo, "http://localhost:8080", 0)
+
+	results, err := svc.ShortenBatch([]model.BatchItem{
+		{CorrelationID: "1", OriginalURL: "https://one.example"},
+	}, "user-1")
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	assert.Equal(t, 2, repo.batchWriteCalls)
+}
+
+func TestDeleterDropsWhenQueueAndSemSaturated(t *testing.T) {
+	d := newDeleter(newStubRepo(), time.Hour, 0, 1)
+
+	done := make(chan struct{})
+	go func() {
+		for i := 0; i < defaultBacklogLimit+1; i++ {
+			d.enqueue(deleteRequest{userID: "user-a", codes: []string{"c1"}})
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("enqueue blocked instead of dropping under full backlog")
+	}
+
+	close(d.done)
+}
+
+func TestDeleterFlushLogsRepoError(t *testing.T) {
+	repo := newStubRepo()
+	repo.deleteErr = errors.New("delete failed")
+
+	d := newDeleter(repo, time.Hour, 4, 16)
+	d.buffer = []deleteRequest{
+		{userID: "user-a", codes: []string{"c1"}},
+		{userID: "user-b", codes: []string{"c2"}},
+	}
+	d.flush()
+
+	assert.Empty(t, d.buffer, "buffer must be cleared even when DeleteBatch fails")
+	repo.mutex.RLock()
+	defer repo.mutex.RUnlock()
+	assert.Equal(t, 2, repo.deleteBatchCalls, "each user group must be attempted")
+}
+
+func TestDeleterWorkerStopsOnDone(t *testing.T) {
+	repo := newStubRepo()
+	d := newDeleter(repo, 10*time.Millisecond, 4, 16)
+	d.start()
+
+	d.enqueue(deleteRequest{userID: "user-a", codes: []string{"c1"}})
+
+	require.Eventually(t, func() bool {
+		repo.mutex.RLock()
+		defer repo.mutex.RUnlock()
+		return repo.deleteBatchCalls > 0
+	}, time.Second, 5*time.Millisecond)
+
+	close(d.done)
+	time.Sleep(50 * time.Millisecond)
+
+	repo.mutex.RLock()
+	defer repo.mutex.RUnlock()
+	assert.Equal(t, 1, repo.deleteBatchCalls, "worker must not flush after done is closed")
 }

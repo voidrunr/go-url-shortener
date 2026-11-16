@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -103,4 +104,142 @@ func TestFileRepository_WriteBatchConflict(t *testing.T) {
 
 	_, err = repo.Get(context.Background(), "b2")
 	assert.ErrorIs(t, err, ErrNotFound)
+}
+
+func testUserURL(code, original, userID string) model.URL {
+	u := testURL(code, original)
+	u.UserID = userID
+	return u
+}
+
+func TestFileRepository_Delete(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "data.json")
+
+	repo, err := NewFile(path)
+	require.NoError(t, err)
+
+	require.NoError(t, repo.Write(context.Background(), testURL("abc123", "https://example.com")))
+	require.NoError(t, repo.Write(context.Background(), testURL("xyz789", "https://other.com")))
+
+	require.NoError(t, repo.Delete(context.Background(), testURL("abc123", "https://example.com")))
+
+	_, err = repo.Get(context.Background(), "abc123")
+	assert.ErrorIs(t, err, ErrNotFound)
+
+	got, err := repo.Get(context.Background(), "xyz789")
+	require.NoError(t, err)
+	assert.Equal(t, "https://other.com", got.Original)
+}
+
+func TestFileRepository_DeletePersists(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "data.json")
+
+	repo, err := NewFile(path)
+	require.NoError(t, err)
+	require.NoError(t, repo.Write(context.Background(), testURL("abc123", "https://example.com")))
+	require.NoError(t, repo.Delete(context.Background(), testURL("abc123", "https://example.com")))
+
+	reopened, err := NewFile(path)
+	require.NoError(t, err)
+
+	_, err = reopened.Get(context.Background(), "abc123")
+	assert.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestFileRepository_DeleteKeepsOtherOrigins(t *testing.T) {
+	repo, err := NewFile(filepath.Join(t.TempDir(), "data.json"))
+	require.NoError(t, err)
+
+	require.NoError(t, repo.Write(context.Background(), testURL("first", "https://same.example")))
+	require.NoError(t, repo.Write(context.Background(), testURL("second", "https://diff.example")))
+
+	require.NoError(t, repo.Delete(context.Background(), testURL("first", "https://same.example")))
+
+	got, err := repo.Get(context.Background(), "second")
+	require.NoError(t, err)
+	assert.Equal(t, "https://diff.example", got.Original)
+
+	_, err = repo.Get(context.Background(), "first")
+	assert.ErrorIs(t, err, ErrNotFound)
+}
+
+func TestFileRepository_GetByUser(t *testing.T) {
+	repo, err := NewFile(filepath.Join(t.TempDir(), "data.json"))
+	require.NoError(t, err)
+
+	require.NoError(t, repo.Write(context.Background(), testUserURL("u1", "https://one.example", "alice")))
+	require.NoError(t, repo.Write(context.Background(), testUserURL("u2", "https://two.example", "alice")))
+	require.NoError(t, repo.Write(context.Background(), testUserURL("b1", "https://bob.example", "bob")))
+
+	urls, err := repo.GetByUser(context.Background(), "alice")
+	require.NoError(t, err)
+	require.Len(t, urls, 2)
+	for _, url := range urls {
+		assert.Equal(t, "alice", url.UserID)
+	}
+
+	empty, err := repo.GetByUser(context.Background(), "nobody")
+	require.NoError(t, err)
+	assert.Empty(t, empty)
+}
+
+func TestFileRepository_DeleteBatch(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "data.json")
+
+	repo, err := NewFile(path)
+	require.NoError(t, err)
+
+	require.NoError(t, repo.Write(context.Background(), testUserURL("d1", "https://d1.example", "alice")))
+	require.NoError(t, repo.Write(context.Background(), testUserURL("keep", "https://keep.example", "alice")))
+	require.NoError(t, repo.Write(context.Background(), testUserURL("bob", "https://bob.example", "bob")))
+
+	require.NoError(t, repo.DeleteBatch(context.Background(), "alice", []string{"d1", "bob"}))
+
+	reopened, err := NewFile(path)
+	require.NoError(t, err)
+
+	got, err := reopened.Get(context.Background(), "d1")
+	require.NoError(t, err)
+	assert.True(t, got.Deleted, "d1 must be tombstoned after reload")
+
+	gotKeep, err := reopened.Get(context.Background(), "keep")
+	require.NoError(t, err)
+	assert.False(t, gotKeep.Deleted)
+
+	gotBob, err := reopened.Get(context.Background(), "bob")
+	require.NoError(t, err)
+	assert.False(t, gotBob.Deleted, "bob belongs to another user and must survive")
+}
+
+func TestFileRepository_DeleteBatchNothing(t *testing.T) {
+	repo, err := NewFile(filepath.Join(t.TempDir(), "data.json"))
+	require.NoError(t, err)
+
+	require.NoError(t, repo.Write(context.Background(), testUserURL("d1", "https://d1.example", "alice")))
+
+	require.NoError(t, repo.DeleteBatch(context.Background(), "nobody", []string{"d1"}))
+
+	got, err := repo.Get(context.Background(), "d1")
+	require.NoError(t, err)
+	assert.False(t, got.Deleted)
+}
+
+func TestFileRepository_LegacyArrayFormat(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "data.json")
+	legacy := `[
+  {"uuid":"legacy-1","original_url":"https://legacy.example","short_url":"leg1","user_id":"","is_deleted":false},
+  {"uuid":"legacy-2","original_url":"https://legacy2.example","short_url":"leg2","user_id":"bob","is_deleted":false}
+]`
+	require.NoError(t, os.WriteFile(path, []byte(legacy), 0o644))
+
+	repo, err := NewFile(path)
+	require.NoError(t, err)
+
+	got1, err := repo.Get(context.Background(), "leg1")
+	require.NoError(t, err)
+	assert.Equal(t, "https://legacy.example", got1.Original)
+
+	got2, err := repo.Get(context.Background(), "leg2")
+	require.NoError(t, err)
+	assert.Equal(t, "bob", got2.UserID)
 }

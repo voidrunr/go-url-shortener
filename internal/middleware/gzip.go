@@ -5,26 +5,54 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 )
+
+var gzipWriterPool = sync.Pool{
+	New: func() any {
+		w, _ := gzip.NewWriterLevel(io.Discard, gzip.DefaultCompression)
+		return w
+	},
+}
+
+func acquireGzipWriter(dst io.Writer) *gzip.Writer {
+	gz := gzipWriterPool.Get().(*gzip.Writer)
+	gz.Reset(dst)
+	return gz
+}
+
+func releaseGzipWriter(gz *gzip.Writer) {
+	gz.Close()
+	gz.Reset(io.Discard)
+	gzipWriterPool.Put(gz)
+}
 
 type compressResponseWriter struct {
 	http.ResponseWriter
 	writer *gzip.Writer
+	status int
 }
 
-func (crw *compressResponseWriter) gzip() bool {
+func (crw *compressResponseWriter) compressed() bool {
 	ct := crw.Header().Get("Content-Type")
-	if !strings.Contains(ct, "application/json") && !strings.Contains(ct, "text/html") {
-		return false
-	}
-	crw.writer = gzip.NewWriter(crw.ResponseWriter)
+	return strings.Contains(ct, "application/json") || strings.Contains(ct, "text/html")
+}
+
+func (crw *compressResponseWriter) gzip() {
+	crw.writer = acquireGzipWriter(crw.ResponseWriter)
 	crw.Header().Del("Content-Length")
 	crw.Header().Set("Content-Encoding", "gzip")
-	return true
+}
+
+func (crw *compressResponseWriter) canCompress() bool {
+	if crw.status >= 300 && crw.status < 400 {
+		return false
+	}
+	return crw.compressed()
 }
 
 func (crw *compressResponseWriter) Write(p []byte) (int, error) {
-	if crw.writer == nil {
+	if crw.writer == nil && crw.canCompress() {
 		crw.gzip()
 	}
 	if crw.writer != nil {
@@ -34,7 +62,10 @@ func (crw *compressResponseWriter) Write(p []byte) (int, error) {
 }
 
 func (crw *compressResponseWriter) WriteHeader(code int) {
-	crw.gzip()
+	crw.status = code
+	if crw.canCompress() {
+		crw.gzip()
+	}
 	crw.ResponseWriter.WriteHeader(code)
 }
 
@@ -54,7 +85,7 @@ func Gzip(next http.Handler) http.Handler {
 			crw := &compressResponseWriter{ResponseWriter: w}
 			defer func() {
 				if crw.writer != nil {
-					crw.writer.Close()
+					releaseGzipWriter(crw.writer)
 				}
 			}()
 			next.ServeHTTP(crw, r)
