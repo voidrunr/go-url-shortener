@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"sync"
 	"time"
 
 	"github.com/rs/zerolog/log"
@@ -25,6 +26,9 @@ type deleter struct {
 	buffer        []deleteRequest
 	flushInterval time.Duration
 	bufferLimit   int
+	backlog       sync.WaitGroup
+	workerWG      sync.WaitGroup
+	stopOnce      sync.Once
 }
 
 func newDeleter(repo Repository, flushInterval time.Duration, queueSize int, bufferLimit int) *deleter {
@@ -39,7 +43,11 @@ func newDeleter(repo Repository, flushInterval time.Duration, queueSize int, buf
 }
 
 func (d *deleter) start() {
-	go d.worker()
+	d.workerWG.Add(1)
+	go func() {
+		defer d.workerWG.Done()
+		d.worker()
+	}()
 }
 
 // enqueue hands the request to the worker without ever blocking the caller.
@@ -54,7 +62,9 @@ func (d *deleter) enqueue(req deleteRequest) {
 
 	select {
 	case d.sem <- struct{}{}:
+		d.backlog.Add(1)
 		go func() {
+			defer d.backlog.Done()
 			defer func() { <-d.sem }()
 			select {
 			case d.queue <- req:
@@ -83,6 +93,26 @@ func (d *deleter) worker() {
 			return
 		}
 	}
+}
+
+// stop shuts the deleter down without losing buffered delete requests:
+// deferred senders are allowed to deliver, the worker stops, any leftovers
+// in the queue are drained and the buffer is flushed to the repository.
+func (d *deleter) stop() {
+	d.stopOnce.Do(func() {
+		d.backlog.Wait()
+		close(d.done)
+		d.workerWG.Wait()
+		for {
+			select {
+			case req := <-d.queue:
+				d.buffer = append(d.buffer, req)
+			default:
+				d.flush()
+				return
+			}
+		}
+	})
 }
 
 func (d *deleter) flush() {

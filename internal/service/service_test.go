@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -280,9 +281,9 @@ func TestDelete_EmptyCodesIsNoop(t *testing.T) {
 	repo := newStubRepo()
 	svc := NewWithDeleter(repo, "http://localhost:8080", 5, 10*time.Millisecond, 16, 64)
 
-	url, err := svc.Shorten("https://keep.example", "user-a")
+	code, err := svc.Shorten("https://keep.example", "user-a")
 	require.NoError(t, err)
-	code := strings.TrimPrefix(url, "http://localhost:8080/")
+	code = strings.TrimPrefix(code, "http://localhost:8080/")
 
 	err = svc.Delete("user-a", nil)
 	require.NoError(t, err)
@@ -295,9 +296,9 @@ func TestResolve_DeletedURLReturnsGone(t *testing.T) {
 	repo := newStubRepo()
 	svc := NewWithDeleter(repo, "http://localhost:8080", 5, 10*time.Millisecond, 16, 64)
 
-	url, err := svc.Shorten("https://gone.example", "user-a")
+	code, err := svc.Shorten("https://gone.example", "user-a")
 	require.NoError(t, err)
-	code := strings.TrimPrefix(url, "http://localhost:8080/")
+	code = strings.TrimPrefix(code, "http://localhost:8080/")
 
 	err = svc.Delete("user-a", []string{code})
 	require.NoError(t, err)
@@ -346,9 +347,9 @@ func TestDeleterFlushesWhenBufferFull(t *testing.T) {
 
 	var codes []string
 	for _, original := range []string{"https://one.example", "https://two.example"} {
-		url, err := svc.Shorten(original, "user-a")
+		code, err := svc.Shorten(original, "user-a")
 		require.NoError(t, err)
-		codes = append(codes, strings.TrimPrefix(url, "http://localhost:8080/"))
+		codes = append(codes, strings.TrimPrefix(code, "http://localhost:8080/"))
 	}
 
 	require.NoError(t, svc.Delete("user-a", []string{codes[0]}))
@@ -500,4 +501,89 @@ func TestDeleterWorkerStopsOnDone(t *testing.T) {
 	repo.mutex.RLock()
 	defer repo.mutex.RUnlock()
 	assert.Equal(t, 1, repo.deleteBatchCalls, "worker must not flush after done is closed")
+}
+
+func TestClose_FlushesPendingDeletes(t *testing.T) {
+	repo := newStubRepo()
+	// Slow flush interval so nothing is flushed by the ticker before Close.
+	svc := NewWithDeleter(repo, "http://localhost:8080", 5, time.Hour, 1, 64)
+
+	codes := make([]string, 0, 5)
+	for i := 0; i < 5; i++ {
+		code, err := svc.Shorten(fmt.Sprintf("https://example.com/close-%d", i), "user-close")
+		if err != nil {
+			t.Fatalf("Write() error = %v", err)
+		}
+		codes = append(codes, strings.TrimPrefix(code, "http://localhost:8080/"))
+	}
+
+	if err := svc.Delete("user-close", codes); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+
+	// Close must flush the buffered deletes without waiting for the ticker.
+	svc.Close()
+
+	repo.mutex.RLock()
+	deleted := 0
+	for _, u := range repo.urls {
+		if u.Deleted {
+			deleted++
+		}
+	}
+	calls := repo.deleteBatchCalls
+	repo.mutex.RUnlock()
+
+	if deleted != len(codes) {
+		t.Errorf("deleted = %d, want %d; pending deletes lost on Close", deleted, len(codes))
+	}
+	if calls == 0 {
+		t.Error("DeleteBatch was never called during Close")
+	}
+}
+
+func TestClose_BacklogSendersDeliverBeforeStop(t *testing.T) {
+	repo := newStubRepo()
+	// Queue size 1 forces the backlog goroutine path on the second request.
+	svc := NewWithDeleter(repo, "http://localhost:8080", 5, time.Hour, 1, 1)
+
+	codes := make([]string, 0, 3)
+	for i := 0; i < 3; i++ {
+		code, err := svc.Shorten(fmt.Sprintf("https://example.com/backlog-%d", i), "user-backlog")
+		if err != nil {
+			t.Fatalf("Write() error = %v", err)
+		}
+		codes = append(codes, strings.TrimPrefix(code, "http://localhost:8080/"))
+	}
+
+	if err := svc.Delete("user-backlog", codes); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+
+	svc.Close()
+
+	repo.mutex.RLock()
+	deleted := 0
+	for _, u := range repo.urls {
+		if u.Deleted {
+			deleted++
+		}
+	}
+	repo.mutex.RUnlock()
+
+	if deleted != len(codes) {
+		t.Errorf("deleted = %d, want %d; backlog requests lost on Close", deleted, len(codes))
+	}
+}
+
+func TestClose_IsIdempotent(t *testing.T) {
+	repo := newStubRepo()
+	svc := NewWithDeleter(repo, "http://localhost:8080", 5, time.Hour, 1, 64)
+
+	svc.Close()
+	svc.Close()
+
+	if repo.deleteBatchCalls > 1 {
+		t.Errorf("deleteBatchCalls = %d after double Close, want <= 1", repo.deleteBatchCalls)
+	}
 }

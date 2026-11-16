@@ -1,12 +1,16 @@
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"database/sql"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -25,6 +29,8 @@ import (
 var buildVersion string
 var buildDate string
 var buildCommit string
+
+const shutdownTimeout = 10 * time.Second
 
 func main() {
 	fmt.Printf("Build version: %s\n", orNA(buildVersion))
@@ -47,18 +53,10 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create repository")
 	}
-	if db != nil {
-		defer db.Close()
-	}
 
 	svc := service.New(repo, cfg.BaseURL, cfg.CollisionRetries)
 
 	emitter := audit.NewEmitter()
-	defer func() {
-		if closeErr := emitter.Close(); closeErr != nil {
-			log.Error().Err(closeErr).Msg("failed to close audit emitter")
-		}
-	}()
 	if cfg.AuditFile != "" {
 		emitter.Subscribe(audit.NewFileSink(cfg.AuditFile))
 	}
@@ -77,41 +75,78 @@ func main() {
 	}
 	hlr := handler.New(svc, opts...)
 
-	log.Info().Str("address", cfg.ServerAddress).Msg("serving")
-
+	var pprofSrv *http.Server
 	if cfg.PprofAddress != "" {
+		pprofSrv = &http.Server{Addr: cfg.PprofAddress}
+		log.Info().Str("address", cfg.PprofAddress).Msg("pprof server")
 		go func() {
-			log.Info().Str("address", cfg.PprofAddress).Msg("pprof server")
-			if listenErr := http.ListenAndServe(cfg.PprofAddress, nil); listenErr != nil {
+			if listenErr := pprofSrv.ListenAndServe(); listenErr != nil && listenErr != http.ErrServerClosed {
 				log.Error().Err(listenErr).Msg("pprof server error")
 			}
 		}()
 	}
 
+	srv := &http.Server{
+		Addr:    cfg.ServerAddress,
+		Handler: hlr.Router(),
+	}
 	if cfg.EnableHTTPS {
 		cert, err := tlscert.SelfSignedCertificate()
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to generate self-signed certificate")
 		}
-
-		srv := &http.Server{
-			Addr:    cfg.ServerAddress,
-			Handler: hlr.Router(),
-			TLSConfig: &tls.Config{
-				Certificates: []tls.Certificate{cert},
-			},
-		}
-
-		log.Info().Str("address", cfg.ServerAddress).Msg("serving https")
-
-		if err := srv.ListenAndServeTLS("", ""); err != nil {
-			log.Fatal().Err(err).Msg("server error")
-		}
-	} else {
-		if err := http.ListenAndServe(cfg.ServerAddress, hlr.Router()); err != nil {
-			log.Fatal().Err(err).Msg("server error")
+		srv.TLSConfig = &tls.Config{
+			Certificates: []tls.Certificate{cert},
 		}
 	}
+
+	serveErr := make(chan error, 1)
+	go func() {
+		if cfg.EnableHTTPS {
+			log.Info().Str("address", cfg.ServerAddress).Msg("serving https")
+			serveErr <- srv.ListenAndServeTLS("", "")
+			return
+		}
+		serveErr <- srv.ListenAndServe()
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+
+	select {
+	case sig := <-quit:
+		log.Info().Str("signal", sig.String()).Msg("shutting down")
+	case err := <-serveErr:
+		if err != nil && err != http.ErrServerClosed {
+			log.Fatal().Err(err).Msg("server error")
+		}
+		log.Fatal().Msg("server stopped unexpectedly")
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Error().Err(err).Msg("graceful shutdown timed out, forcing close")
+		_ = srv.Close()
+	}
+	if pprofSrv != nil {
+		_ = pprofSrv.Shutdown(context.Background())
+	}
+	if err := <-serveErr; err != nil && err != http.ErrServerClosed {
+		log.Error().Err(err).Msg("server error")
+	}
+
+	svc.Close()
+	if closeErr := emitter.Close(); closeErr != nil {
+		log.Error().Err(closeErr).Msg("failed to close audit emitter")
+	}
+	if db != nil {
+		if closeErr := db.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msg("failed to close database")
+		}
+	}
+
+	log.Info().Msg("serving stopped")
 }
 
 func buildRepository(cfg config.Config) (repository.Repository, *sql.DB, error) {
