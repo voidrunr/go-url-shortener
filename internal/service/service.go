@@ -19,6 +19,7 @@ type Repository interface {
 	Get(ctx context.Context, code string) (model.URL, error)
 	GetByUser(ctx context.Context, userID string) ([]model.URL, error)
 	DeleteBatch(ctx context.Context, userID string, codes []string) error
+	Stats(ctx context.Context) (urls, users int, err error)
 }
 
 type URLService struct {
@@ -53,6 +54,11 @@ func NewWithDeleter(repo Repository, baseURL string, collisionRetries int, flush
 // call more than once.
 func (s *URLService) Close() {
 	s.deleter.stop()
+}
+
+// Stats returns the number of shortened URLs and unique users in the service.
+func (s *URLService) Stats(ctx context.Context) (urls, users int, err error) {
+	return s.repo.Stats(ctx)
 }
 
 const codeAlphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"

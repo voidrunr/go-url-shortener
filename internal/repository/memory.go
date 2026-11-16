@@ -102,3 +102,15 @@ func (repo *MemoryRepository) DeleteBatch(ctx context.Context, userID string, co
 
 	return nil
 }
+
+func (repo *MemoryRepository) Stats(ctx context.Context) (urls, users int, err error) {
+	repo.mutex.RLock()
+	defer repo.mutex.RUnlock()
+
+	usersByID := make(map[string]struct{}, len(repo.store))
+	for _, url := range repo.store {
+		usersByID[url.UserID] = struct{}{}
+	}
+
+	return len(repo.store), len(usersByID), nil
+}

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
 	"testing"
 	"time"
@@ -889,4 +890,85 @@ func TestHandleUserURLs_InvalidBaseURLReturns500(t *testing.T) {
 	handler.New(svc, handler.WithAuth(s), handler.WithBaseURL("http://%zz")).Router().ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
+}
+
+func TestInternalStats_DenyWhenSubnetEmpty(t *testing.T) {
+	svc := mocks.NewShortener(t)
+
+	router := handler.New(svc).Router()
+	req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
+	req.Header.Set("X-Real-IP", "192.168.1.10")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestInternalStats_DenyWithoutHeader(t *testing.T) {
+	svc := mocks.NewShortener(t)
+
+	trusted, err := netip.ParsePrefix("192.168.1.0/24")
+	require.NoError(t, err)
+
+	router := handler.New(svc, handler.WithTrustedSubnet(trusted)).Router()
+	req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestInternalStats_DenyOutsideSubnet(t *testing.T) {
+	svc := mocks.NewShortener(t)
+
+	trusted, err := netip.ParsePrefix("192.168.1.0/24")
+	require.NoError(t, err)
+
+	router := handler.New(svc, handler.WithTrustedSubnet(trusted)).Router()
+	req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
+	req.Header.Set("X-Real-IP", "10.0.0.5")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestInternalStats_DenyInvalidIP(t *testing.T) {
+	svc := mocks.NewShortener(t)
+
+	trusted, err := netip.ParsePrefix("192.168.1.0/24")
+	require.NoError(t, err)
+
+	router := handler.New(svc, handler.WithTrustedSubnet(trusted)).Router()
+	req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
+	req.Header.Set("X-Real-IP", "not-an-ip")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusForbidden, w.Code)
+}
+
+func TestInternalStats_AllowInsideSubnet(t *testing.T) {
+	svc := mocks.NewShortener(t)
+	svc.EXPECT().Stats(mock.Anything).Return(42, 7, nil)
+
+	trusted, err := netip.ParsePrefix("192.168.1.0/24")
+	require.NoError(t, err)
+
+	router := handler.New(svc, handler.WithTrustedSubnet(trusted)).Router()
+	req := httptest.NewRequest(http.MethodGet, "/api/internal/stats", nil)
+	req.Header.Set("X-Real-IP", "192.168.1.10")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/json", w.Header().Get("Content-Type"))
+
+	var body struct {
+		URLs  int `json:"urls"`
+		Users int `json:"users"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	assert.Equal(t, 42, body.URLs)
+	assert.Equal(t, 7, body.Users)
 }

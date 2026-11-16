@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
+	"net/netip"
 	"os"
 	"os/signal"
 	"syscall"
@@ -69,6 +70,13 @@ func main() {
 		handler.WithBaseURL(cfg.BaseURL),
 		handler.WithLogger(log.Logger),
 		handler.WithAudit(emitter),
+	}
+	if cfg.TrustedSubnet != "" {
+		trustedSubnet, err := netip.ParsePrefix(cfg.TrustedSubnet)
+		if err != nil {
+			log.Fatal().Err(err).Msg("invalid trusted subnet configuration")
+		}
+		opts = append(opts, handler.WithTrustedSubnet(trustedSubnet))
 	}
 	if db != nil {
 		opts = append(opts, handler.WithPinger(db))

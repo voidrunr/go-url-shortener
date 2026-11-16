@@ -10,8 +10,8 @@
 
 1. значения по умолчанию;
 2. JSON-файл конфигурации (путь: флаг `-c` / `-config` или переменная окружения `CONFIG`);
-3. флаги, заданные явно при запуске (`-a`, `-b`, `-m`, `-f`, `-d`, `-secret-key`, `-token-ttl`, `-audit-file`, `-audit-url`, `-pprof-address`, `-s`);
-4. переменные окружения (`SERVER_ADDRESS`, `BASE_URL`, `FILE_STORAGE_PATH`, `DATABASE_DSN`, `SECRET_KEY`, `TOKEN_TTL`, `AUDIT_FILE`, `AUDIT_URL`, `PPROF_ADDRESS`, `ENABLE_HTTPS`, `CONFIG`).
+3. флаги, заданные явно при запуске (`-a`, `-b`, `-m`, `-f`, `-d`, `-secret-key`, `-token-ttl`, `-audit-file`, `-audit-url`, `-pprof-address`, `-s`, `-t`);
+4. переменные окружения (`SERVER_ADDRESS`, `BASE_URL`, `FILE_STORAGE_PATH`, `DATABASE_DSN`, `SECRET_KEY`, `TOKEN_TTL`, `AUDIT_FILE`, `AUDIT_URL`, `PPROF_ADDRESS`, `ENABLE_HTTPS`, `TRUSTED_SUBNET`, `CONFIG`).
 
 Применяются только ключи, присутствующие в файле; отсутствующие ключи не перезаписывают дефолты.
 
@@ -31,7 +31,8 @@
     "audit_file": "",
     "audit_url": "",
     "pprof_address": "",
-    "enable_https": true
+    "enable_https": true,
+    "trusted_subnet": ""
 }
 ```
 

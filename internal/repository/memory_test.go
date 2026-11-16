@@ -157,3 +157,21 @@ func TestMemoryRepository_Empty(t *testing.T) {
 	_, err := repo.Get(context.Background(), "anything")
 	assert.ErrorIs(t, err, ErrNotFound)
 }
+
+func TestMemoryRepository_Stats(t *testing.T) {
+	repo := NewMemory()
+
+	urls, users, err := repo.Stats(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 0, urls)
+	require.Equal(t, 0, users)
+
+	require.NoError(t, repo.Write(context.Background(), model.URL{Code: "a", Original: "https://one.example", UserID: "user-1"}))
+	require.NoError(t, repo.Write(context.Background(), model.URL{Code: "b", Original: "https://two.example", UserID: "user-1"}))
+	require.NoError(t, repo.Write(context.Background(), model.URL{Code: "c", Original: "https://three.example", UserID: "user-2"}))
+
+	urls, users, err = repo.Stats(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 3, urls)
+	require.Equal(t, 2, users)
+}

@@ -21,6 +21,7 @@ type Config struct {
 	CollisionRetries int
 	TokenTTL         time.Duration
 	EnableHTTPS      bool
+	TrustedSubnet    string
 }
 
 func Parse() (Config, error) {
@@ -38,6 +39,7 @@ func Parse() (Config, error) {
 	flag.StringVar(&cfg.AuditURL, "audit-url", "", "URL of remote sink for audit events")
 	flag.StringVar(&cfg.PprofAddress, "pprof-address", "", "address for the pprof debug server (empty = disabled)")
 	flag.BoolVar(&cfg.EnableHTTPS, "s", false, "enable HTTPS with an in-memory self-signed certificate")
+	flag.StringVar(&cfg.TrustedSubnet, "t", "", "trusted subnet in CIDR notation for /api/internal/stats (empty = deny all)")
 	flag.StringVar(&configPath, "c", "", "path to JSON config file")
 	flag.StringVar(&configPath, "config", "", "path to JSON config file")
 	flag.Parse()
@@ -69,6 +71,7 @@ func Parse() (Config, error) {
 		"audit-url":     func() { cfg.AuditURL = snapshot.AuditURL },
 		"pprof-address": func() { cfg.PprofAddress = snapshot.PprofAddress },
 		"s":             func() { cfg.EnableHTTPS = snapshot.EnableHTTPS },
+		"t":             func() { cfg.TrustedSubnet = snapshot.TrustedSubnet },
 	}
 	for name, apply := range reapply {
 		if explicit[name] {
@@ -85,6 +88,7 @@ func Parse() (Config, error) {
 		"AUDIT_FILE":        &cfg.AuditFile,
 		"AUDIT_URL":         &cfg.AuditURL,
 		"PPROF_ADDRESS":     &cfg.PprofAddress,
+		"TRUSTED_SUBNET":    &cfg.TrustedSubnet,
 	}
 	for name, target := range env {
 		if val := os.Getenv(name); val != "" {
@@ -157,6 +161,9 @@ func applyFile(cfg *Config, path string) error {
 	}
 	if fc.EnableHTTPS != nil {
 		cfg.EnableHTTPS = *fc.EnableHTTPS
+	}
+	if fc.TrustedSubnet != nil {
+		cfg.TrustedSubnet = *fc.TrustedSubnet
 	}
 
 	return nil
