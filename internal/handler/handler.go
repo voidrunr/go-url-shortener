@@ -149,19 +149,25 @@ var bodyPool = pool.New(func() *bytes.Buffer {
 	return new(bytes.Buffer)
 })
 
-// readBody reads the whole body into a pooled buffer and returns the
-// trimmed copy as a string. The buffer is handed back to the pool
-// before the handler proceeds, since String() already made its copy.
-func readBody(r io.Reader) string {
+// readBody reads the whole body into a pooled buffer and returns its
+// contents as a string. The buffer is handed back to the pool before
+// the handler proceeds, since String() already made its copy.
+func readBody(r io.Reader) (string, error) {
 	buf := bodyPool.Get()
 	defer bodyPool.Put(buf)
 	buf.Reset()
-	io.Copy(buf, r)
-	return buf.String()
+	if _, err := io.Copy(buf, r); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
 }
 
 func (hlr *URLHandler) handleShorten(w http.ResponseWriter, r *http.Request) {
-	body := readBody(r.Body)
+	body, err := readBody(r.Body)
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+		return
+	}
 	if len(strings.TrimSpace(body)) == 0 {
 		http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
 		return

@@ -43,6 +43,7 @@ func Logging(next http.Handler) http.Handler {
 		start := time.Now()
 		rw := loggerPool.Get()
 		rw.ResponseWriter = w
+		defer loggerPool.Put(rw)
 
 		next.ServeHTTP(rw, r)
 
@@ -53,7 +54,5 @@ func Logging(next http.Handler) http.Handler {
 			Int("status", rw.statusCode).
 			Int("size", rw.size).
 			Msg("request")
-
-		loggerPool.Put(rw)
 	})
 }

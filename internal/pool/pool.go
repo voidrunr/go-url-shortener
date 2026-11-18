@@ -23,7 +23,7 @@ type Resettable interface {
 // Pool is a concurrency-safe container of reusable objects of one
 // concrete type T.
 type Pool[T Resettable] struct {
-	sync.Pool
+	pool sync.Pool
 }
 
 // New returns a Pool backed by the given factory. The factory is
@@ -31,18 +31,18 @@ type Pool[T Resettable] struct {
 // usable (not just zero) object of T.
 func New[T Resettable](create func() T) *Pool[T] {
 	return &Pool[T]{
-		Pool: sync.Pool{New: func() any { return create() }},
+		pool: sync.Pool{New: func() any { return create() }},
 	}
 }
 
 // Get returns an object from the pool, constructing a fresh one
 // through the factory when the pool is empty.
 func (p *Pool[T]) Get() T {
-	return p.Pool.Get().(T)
+	return p.pool.Get().(T)
 }
 
 // Put hands an object back to the pool after resetting its state.
 func (p *Pool[T]) Put(x T) {
 	x.Reset()
-	p.Pool.Put(x)
+	p.pool.Put(x)
 }
