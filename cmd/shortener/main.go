@@ -31,7 +31,11 @@ var buildVersion = "N/A"
 var buildDate = "N/A"
 var buildCommit = "N/A"
 
-const shutdownTimeout = 10 * time.Second
+const (
+	shutdownTimeout   = 10 * time.Second
+	readHeaderTimeout = 5 * time.Second
+	idleTimeout       = 60 * time.Second
+)
 
 func main() {
 	fmt.Printf("Build version: %s\n", buildVersion)
@@ -85,7 +89,11 @@ func main() {
 
 	var pprofSrv *http.Server
 	if cfg.PprofAddress != "" {
-		pprofSrv = &http.Server{Addr: cfg.PprofAddress}
+		pprofSrv = &http.Server{
+			Addr:              cfg.PprofAddress,
+			ReadHeaderTimeout: readHeaderTimeout,
+			IdleTimeout:       idleTimeout,
+		}
 		log.Info().Str("address", cfg.PprofAddress).Msg("pprof server")
 		go func() {
 			if listenErr := pprofSrv.ListenAndServe(); listenErr != nil && listenErr != http.ErrServerClosed {
@@ -95,8 +103,10 @@ func main() {
 	}
 
 	srv := &http.Server{
-		Addr:    cfg.ServerAddress,
-		Handler: hlr.Router(),
+		Addr:              cfg.ServerAddress,
+		Handler:           hlr.Router(),
+		ReadHeaderTimeout: readHeaderTimeout,
+		IdleTimeout:       idleTimeout,
 	}
 	if cfg.EnableHTTPS {
 		cert, err := tlscert.SelfSignedCertificate()
@@ -121,8 +131,14 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 
+	shutdown := make(chan os.Signal, 1)
+	go func() {
+		shutdown <- <-quit
+		forceExit(<-quit)
+	}()
+
 	select {
-	case sig := <-quit:
+	case sig := <-shutdown:
 		log.Info().Str("signal", sig.String()).Msg("shutting down")
 	case err := <-serveErr:
 		if err != nil && err != http.ErrServerClosed {
@@ -136,9 +152,6 @@ func main() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("graceful shutdown timed out, forcing close")
 		_ = srv.Close()
-	}
-	if pprofSrv != nil {
-		_ = pprofSrv.Shutdown(context.Background())
 	}
 	if err := <-serveErr; err != nil && err != http.ErrServerClosed {
 		log.Error().Err(err).Msg("server error")
@@ -154,7 +167,25 @@ func main() {
 		}
 	}
 
+	if pprofSrv != nil {
+		pprofCtx, cancelPprof := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancelPprof()
+		if err := pprofSrv.Shutdown(pprofCtx); err != nil {
+			log.Error().Err(err).Msg("pprof server shutdown timed out, forcing close")
+			_ = pprofSrv.Close()
+		}
+	}
+
 	log.Info().Msg("serving stopped")
+}
+
+func forceExit(sig os.Signal) {
+	log.Warn().Str("signal", sig.String()).Msg("second signal, forcing exit")
+	signum, ok := sig.(syscall.Signal)
+	if !ok {
+		signum = syscall.SIGTERM
+	}
+	os.Exit(128 + int(signum))
 }
 
 func buildRepository(cfg config.Config) (repository.Repository, *sql.DB, error) {
