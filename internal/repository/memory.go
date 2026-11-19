@@ -8,9 +8,9 @@ import (
 )
 
 type MemoryRepository struct {
-	mutex      sync.RWMutex
 	store      map[string]model.URL
 	byOriginal map[string]string
+	mutex      sync.RWMutex
 }
 
 func NewMemory() *MemoryRepository {

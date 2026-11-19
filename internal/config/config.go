@@ -10,14 +10,14 @@ import (
 type Config struct {
 	ServerAddress    string
 	BaseURL          string
-	CollisionRetries int
 	FileStoragePath  string
 	DatabaseDSN      string
 	SecretKey        string
-	TokenTTL         time.Duration
 	AuditFile        string
 	AuditURL         string
 	PprofAddress     string
+	CollisionRetries int
+	TokenTTL         time.Duration
 }
 
 func Parse() (Config, error) {

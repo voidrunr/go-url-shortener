@@ -21,14 +21,14 @@ const (
 
 // Event is a single audit record.
 type Event struct {
-	// TS is the event time as a Unix timestamp in seconds.
-	TS int64 `json:"ts"`
 	// Action is the audited operation.
 	Action Action `json:"action"`
 	// UserID is the authenticated user ID, or empty for anonymous requests.
 	UserID string `json:"user_id"`
 	// URL is the original URL involved in the operation.
 	URL string `json:"url"`
+	// TS is the event time as a Unix timestamp in seconds.
+	TS int64 `json:"ts"`
 }
 
 // Sink receives audit events. Write implementations must be safe for
@@ -49,8 +49,8 @@ const defaultQueueSize = 256
 //
 // An Emitter must be closed when it is no longer needed.
 type Emitter struct {
-	mu      sync.RWMutex
 	workers atomic.Pointer[[]*sinkWorker]
+	mu      sync.RWMutex
 	closed  bool
 }
 

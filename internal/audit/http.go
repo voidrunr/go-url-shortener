@@ -11,8 +11,8 @@ const defaultHTTPTimeout = 3 * time.Second
 
 // HTTPSink delivers audit events to an HTTP endpoint.
 type HTTPSink struct {
-	url    string
 	client *http.Client
+	url    string
 }
 
 // NewHTTPSink returns an HTTPSink that posts JSON events to url. Requests time

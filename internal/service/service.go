@@ -23,9 +23,9 @@ type Repository interface {
 
 type URLService struct {
 	repo             Repository
+	deleter          *deleter
 	shortBase        string
 	collisionRetries int
-	deleter          *deleter
 }
 
 const (
@@ -101,8 +101,7 @@ func (srv URLService) Shorten(originalURL string, userID string) (string, error)
 		}
 
 		if err := srv.repo.Write(context.TODO(), u); err != nil {
-			var dupErr *repository.DuplicateURLError
-			if errors.As(err, &dupErr) {
+			if dupErr, ok := errors.AsType[*repository.DuplicateURLError](err); ok {
 				return srv.shortBase + dupErr.URL.Code, repository.ErrURLAlreadyExists
 			}
 			if errors.Is(err, repository.ErrConflict) {

@@ -40,8 +40,8 @@ type tokenClaims struct {
 }
 
 type Signer struct {
-	secret   []byte
 	verifier *Verifier
+	secret   []byte
 	ttl      time.Duration
 }
 
@@ -120,20 +120,20 @@ func (s *Signer) Handler(next http.Handler) http.Handler {
 func (v *Verifier) Resolve(r *http.Request) (string, State) {
 	c, err := r.Cookie(CookieName)
 	if errors.Is(err, http.ErrNoCookie) {
-		id, err := NewUserID()
-		if err != nil {
+		newID, genErr := NewUserID()
+		if genErr != nil {
 			return "", StateUnauthorized
 		}
-		return id, StateNew
+		return newID, StateNew
 	}
 
 	id, err := v.verify(c.Value)
 	if err != nil {
-		id, genErr := NewUserID()
+		newID, genErr := NewUserID()
 		if genErr != nil {
 			return "", StateUnauthorized
 		}
-		return id, StateNew
+		return newID, StateNew
 	}
 	if id == "" {
 		return "", StateUnauthorized

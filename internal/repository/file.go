@@ -14,14 +14,14 @@ import (
 )
 
 type fileEntry struct {
+	CreatedAt time.Time  `json:"created_at"`
+	UpdatedAt time.Time  `json:"updated_at"`
+	ExpiresAt *time.Time `json:"expires_at"`
 	UUID      string     `json:"uuid"`
 	Original  string     `json:"original_url"`
 	Code      string     `json:"short_url"`
 	UserID    string     `json:"user_id"`
 	Deleted   bool       `json:"is_deleted"`
-	CreatedAt time.Time  `json:"created_at"`
-	UpdatedAt time.Time  `json:"updated_at"`
-	ExpiresAt *time.Time `json:"expires_at"`
 }
 
 func toFileEntry(url model.URL) fileEntry {
@@ -51,10 +51,10 @@ func fromFileEntry(e fileEntry) model.URL {
 }
 
 type FileRepository struct {
-	mutex      sync.RWMutex
 	store      map[string]model.URL
 	byOriginal map[string]string
 	filePath   string
+	mutex      sync.RWMutex
 }
 
 func NewFile(filePath string) (*FileRepository, error) {

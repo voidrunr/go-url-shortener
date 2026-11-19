@@ -7,6 +7,20 @@
 1. Склонируйте репозиторий в любую подходящую директорию на вашем компьютере.
 2. В корне репозитория выполните команду `go mod init <name>` (где `<name>` — адрес вашего репозитория на GitHub без префикса `https://`) для создания модуля.
 
+## Сборка
+
+Информация о версии задаётся линкером через `-X` для переменных из `cmd/shortener/main.go`:
+
+```bash
+go build -ldflags "\
+  -X main.buildVersion=1.0.0 \
+  -X main.buildDate=2026-11-18 \
+  -X main.buildCommit=abc1234" \
+  -o build/go-url-shortener ./cmd/shortener
+```
+
+Без `-ldflags` (в том числе при `make build`) переменные остаются с дефолтным значением `N/A`.
+
 ## Обновление шаблона
 
 Чтобы иметь возможность получать обновления автотестов и других частей шаблона, выполните команду:
@@ -30,6 +44,18 @@ git fetch template && git checkout template/v2 .github
 При мёрже ветки с инкрементом в основную ветку `main` будут запускаться все автотесты.
 
 Подробнее про локальный и автоматический запуск читайте в [README автотестов](https://github.com/Yandex-Practicum/go-autotests).
+
+## Статический анализ
+
+Проект проверяется собственным multichecker'ом `cmd/staticlint`: стандартные анализаторы `golang.org/x/tools/go/analysis/passes`, все проверки SA из staticcheck.io, `unused` (U1000), сторонние `bodyclose` и `nilerr`, а также собственный анализатор `exitcheck`, запрещающий прямой вызов `os.Exit` в `main` пакета `main`.
+
+```bash
+make staticlint            # go run ./cmd/staticlint ./...
+go run ./cmd/staticlint -v ./internal/handler   # только один пакет
+go doc ./cmd/staticlint    # полное описание запуска и каждого анализатора
+```
+
+Отключить конкретную проверку можно флагом `-имя.enable=false`, например `-fieldalignment.enable=false`. Код проекта проходит все проверки; тесты анализатора `exitcheck` лежат в `cmd/staticlint/exitcheck`.
 
 ## Структура проекта
 

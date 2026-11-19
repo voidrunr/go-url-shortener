@@ -2,7 +2,7 @@ APP_NAME:= go-url-shortener
 APP_MAIN:= ./cmd/shortener/main.go
 BUILD_DIR:= ./build
 
-.PHONY: all build run clean test lint vet
+.PHONY: all build run clean test lint vet staticlint cover
 
 all: run
 
@@ -17,6 +17,14 @@ test:
 
 lint:
 	go vet ./...
+
+staticlint:
+	go run ./cmd/staticlint ./...
+
+cover:
+	@test -f .env && set -a && . ./.env && set +a; go test ./... -coverprofile=coverage.out
+	go tool cover -func=coverage.out | tail -1
+	rm -f coverage.out
 
 format:
 	gofmt -w .

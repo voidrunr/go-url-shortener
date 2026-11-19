@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"fmt"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -19,7 +20,15 @@ import (
 	"github.com/voidrunr/go-url-shortener/internal/service"
 )
 
+var buildVersion = "N/A"
+var buildDate = "N/A"
+var buildCommit = "N/A"
+
 func main() {
+	fmt.Printf("Build version: %s\n", buildVersion)
+	fmt.Printf("Build date: %s\n", buildDate)
+	fmt.Printf("Build commit: %s\n", buildCommit)
+
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
 
 	cfg, err := config.Parse()
@@ -44,8 +53,8 @@ func main() {
 
 	emitter := audit.NewEmitter()
 	defer func() {
-		if err := emitter.Close(); err != nil {
-			log.Error().Err(err).Msg("failed to close audit emitter")
+		if closeErr := emitter.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msg("failed to close audit emitter")
 		}
 	}()
 	if cfg.AuditFile != "" {
@@ -71,8 +80,8 @@ func main() {
 	if cfg.PprofAddress != "" {
 		go func() {
 			log.Info().Str("address", cfg.PprofAddress).Msg("pprof server")
-			if err := http.ListenAndServe(cfg.PprofAddress, nil); err != nil {
-				log.Error().Err(err).Msg("pprof server error")
+			if listenErr := http.ListenAndServe(cfg.PprofAddress, nil); listenErr != nil {
+				log.Error().Err(listenErr).Msg("pprof server error")
 			}
 		}()
 	}

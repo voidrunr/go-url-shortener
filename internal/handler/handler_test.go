@@ -165,9 +165,9 @@ func TestAudit_NoAuditOnError(t *testing.T) {
 
 func TestHandleShorten(t *testing.T) {
 	type want struct {
-		code        int
 		body        string
 		contentType string
+		code        int
 	}
 	tests := []struct {
 		name  string
@@ -250,13 +250,35 @@ func TestHandleShorten(t *testing.T) {
 	}
 }
 
+type partialErrorReader struct {
+	payload string
+	err     error
+}
+
+func (r partialErrorReader) Read(p []byte) (int, error) {
+	return copy(p, r.payload), r.err
+}
+
+func TestHandleShortenBodyReadError(t *testing.T) {
+	svc := mocks.NewShortener(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/", http.NoBody)
+	req.Body = io.NopCloser(partialErrorReader{payload: "https://example.com", err: io.ErrUnexpectedEOF})
+	w := httptest.NewRecorder()
+
+	newHandler(svc).ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "Bad Request\n", w.Body.String())
+}
+
 // --- POST /api/shorten ---
 
 func TestHandleAPIShorten(t *testing.T) {
 	type want struct {
-		code        int
 		result      string
 		contentType string
+		code        int
 	}
 	tests := []struct {
 		name    string
@@ -386,8 +408,8 @@ func TestHandleShorten_WrongPath(t *testing.T) {
 
 func TestHandleResolve(t *testing.T) {
 	type want struct {
-		code     int
 		location string
+		code     int
 	}
 	tests := []struct {
 		name  string
@@ -462,8 +484,8 @@ func TestHandleResolve(t *testing.T) {
 
 func TestHandleAPIShortenBatch(t *testing.T) {
 	type want struct {
-		code        int
 		contentType string
+		code        int
 	}
 	tests := []struct {
 		name  string
@@ -562,8 +584,8 @@ func (p pingerStub) PingContext(context.Context) error {
 
 func TestHandlePing(t *testing.T) {
 	tests := []struct {
-		name   string
 		pinger handler.Pinger
+		name   string
 		want   int
 	}{
 		{
@@ -639,13 +661,13 @@ func TestRoute_UnsupportedMethods(t *testing.T) {
 
 func TestHandleUserURLs(t *testing.T) {
 	tests := []struct {
-		name        string
-		sendCookie  bool
-		cookieUser  string
 		setup       func(*mocks.Shortener)
-		wantCode    int
-		wantNoBody  bool
+		name        string
+		cookieUser  string
 		wantResults []map[string]string
+		wantCode    int
+		sendCookie  bool
+		wantNoBody  bool
 	}{
 		{
 			name:       "no cookie creates user and returns 204 for empty list",
@@ -762,12 +784,12 @@ func TestHandleUserURLs_SetsCookieOnFirstVisit(t *testing.T) {
 
 func TestHandleDeleteUserURLs(t *testing.T) {
 	tests := []struct {
+		setup      func(*mocks.Shortener)
 		name       string
-		sendCookie bool
 		cookieUser string
 		body       string
-		setup      func(*mocks.Shortener)
 		wantCode   int
+		sendCookie bool
 	}{
 		{
 			name:       "valid request returns 202",
