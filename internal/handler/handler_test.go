@@ -251,6 +251,28 @@ func TestHandleShorten(t *testing.T) {
 	}
 }
 
+type partialErrorReader struct {
+	payload string
+	err     error
+}
+
+func (r partialErrorReader) Read(p []byte) (int, error) {
+	return copy(p, r.payload), r.err
+}
+
+func TestHandleShortenBodyReadError(t *testing.T) {
+	svc := mocks.NewShortener(t)
+
+	req := httptest.NewRequest(http.MethodPost, "/", http.NoBody)
+	req.Body = io.NopCloser(partialErrorReader{payload: "https://example.com", err: io.ErrUnexpectedEOF})
+	w := httptest.NewRecorder()
+
+	newHandler(svc).ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Equal(t, "Bad Request\n", w.Body.String())
+}
+
 // --- POST /api/shorten ---
 
 func TestHandleAPIShorten(t *testing.T) {

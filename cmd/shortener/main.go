@@ -27,16 +27,16 @@ import (
 	"github.com/voidrunr/go-url-shortener/internal/tlscert"
 )
 
-var buildVersion string
-var buildDate string
-var buildCommit string
+var buildVersion = "N/A"
+var buildDate = "N/A"
+var buildCommit = "N/A"
 
 const shutdownTimeout = 10 * time.Second
 
 func main() {
-	fmt.Printf("Build version: %s\n", orNA(buildVersion))
-	fmt.Printf("Build date: %s\n", orNA(buildDate))
-	fmt.Printf("Build commit: %s\n", orNA(buildCommit))
+	fmt.Printf("Build version: %s\n", buildVersion)
+	fmt.Printf("Build date: %s\n", buildDate)
+	fmt.Printf("Build commit: %s\n", buildCommit)
 
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout})
 
@@ -182,11 +182,4 @@ func buildRepository(cfg config.Config) (repository.Repository, *sql.DB, error) 
 	default:
 		return repository.NewMemory(), nil, nil
 	}
-}
-
-func orNA(v string) string {
-	if v == "" {
-		return "N/A"
-	}
-	return v
 }

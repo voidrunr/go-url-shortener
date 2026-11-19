@@ -52,13 +52,13 @@ func NewWithDeleter(repo Repository, baseURL string, collisionRetries int, flush
 
 // Close flushes pending asynchronous deletions to the repository. Safe to
 // call more than once.
-func (s *URLService) Close() {
-	s.deleter.stop()
+func (srv *URLService) Close() {
+	srv.deleter.stop()
 }
 
 // Stats returns the number of shortened URLs and unique users in the service.
-func (s *URLService) Stats(ctx context.Context) (urls, users int, err error) {
-	return s.repo.Stats(ctx)
+func (srv *URLService) Stats(ctx context.Context) (urls, users int, err error) {
+	return srv.repo.Stats(ctx)
 }
 
 const codeAlphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
