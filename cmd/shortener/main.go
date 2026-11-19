@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
 	"net/netip"
@@ -15,12 +17,16 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/soheilhy/cmux"
+	"google.golang.org/grpc"
 
+	pb "github.com/voidrunr/go-url-shortener/api/shortener"
 	"github.com/voidrunr/go-url-shortener/internal/audit"
 	"github.com/voidrunr/go-url-shortener/internal/auth"
 	"github.com/voidrunr/go-url-shortener/internal/config"
 	"github.com/voidrunr/go-url-shortener/internal/database"
 	"github.com/voidrunr/go-url-shortener/internal/database/migrations"
+	"github.com/voidrunr/go-url-shortener/internal/grpcserver"
 	"github.com/voidrunr/go-url-shortener/internal/handler"
 	"github.com/voidrunr/go-url-shortener/internal/repository"
 	"github.com/voidrunr/go-url-shortener/internal/service"
@@ -46,6 +52,10 @@ func main() {
 	}
 
 	signer, err := auth.NewSigner(cfg.SecretKey, cfg.TokenTTL)
+	if err != nil {
+		log.Fatal().Err(err).Msg("invalid auth configuration")
+	}
+	verifier, err := auth.NewVerifier(cfg.SecretKey)
 	if err != nil {
 		log.Fatal().Err(err).Msg("invalid auth configuration")
 	}
@@ -98,38 +108,71 @@ func main() {
 		Addr:    cfg.ServerAddress,
 		Handler: hlr.Router(),
 	}
+
+	var tlsConfig *tls.Config
 	if cfg.EnableHTTPS {
 		cert, err := tlscert.SelfSignedCertificate()
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to generate self-signed certificate")
 		}
-		srv.TLSConfig = &tls.Config{
+		tlsConfig = &tls.Config{
 			Certificates: []tls.Certificate{cert},
+			NextProtos:   []string{"h2", "http/1.1"},
 		}
 	}
 
-	serveErr := make(chan error, 1)
+	listener, err := net.Listen("tcp", cfg.ServerAddress)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to listen")
+	}
+	var serveListener net.Listener = listener
+	if tlsConfig != nil {
+		serveListener = tls.NewListener(listener, tlsConfig)
+	}
+
+	mux := cmux.New(serveListener)
+	grpcListener := mux.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
+	httpListener := mux.Match(cmux.HTTP1Fast(), cmux.HTTP2())
+
+	grpcServer := grpc.NewServer(grpc.ChainUnaryInterceptor(
+		grpcserver.UnaryLogger(log.Logger),
+		grpcserver.UnaryRecovery(log.Logger),
+	))
+	pb.RegisterShortenerServiceServer(grpcServer, grpcserver.New(svc, verifier, cfg.BaseURL, emitter, log.Logger))
+
+	serveErr := make(chan error, 3)
 	go func() {
 		if cfg.EnableHTTPS {
 			log.Info().Str("address", cfg.ServerAddress).Msg("serving https")
-			serveErr <- srv.ListenAndServeTLS("", "")
-			return
+		} else {
+			log.Info().Str("address", cfg.ServerAddress).Msg("serving http")
 		}
-		serveErr <- srv.ListenAndServe()
+		serveErr <- mux.Serve()
+	}()
+	go func() {
+		serveErr <- srv.Serve(httpListener)
+	}()
+	go func() {
+		serveErr <- grpcServer.Serve(grpcListener)
 	}()
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
 
+	received := 0
+	var serveFailure error
 	select {
 	case sig := <-quit:
 		log.Info().Str("signal", sig.String()).Msg("shutting down")
 	case err := <-serveErr:
-		if err != nil && err != http.ErrServerClosed {
-			log.Fatal().Err(err).Msg("server error")
+		received = 1
+		if !expectedServeError(err) {
+			serveFailure = err
 		}
-		log.Fatal().Msg("server stopped unexpectedly")
 	}
+
+	mux.Close()
+	_ = listener.Close()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
@@ -137,11 +180,14 @@ func main() {
 		log.Error().Err(err).Msg("graceful shutdown timed out, forcing close")
 		_ = srv.Close()
 	}
+	grpcServer.GracefulStop()
 	if pprofSrv != nil {
 		_ = pprofSrv.Shutdown(context.Background())
 	}
-	if err := <-serveErr; err != nil && err != http.ErrServerClosed {
-		log.Error().Err(err).Msg("server error")
+	for i := 0; i < 3-received; i++ {
+		if err := <-serveErr; !expectedServeError(err) {
+			log.Error().Err(err).Msg("server error")
+		}
 	}
 
 	svc.Close()
@@ -153,8 +199,20 @@ func main() {
 			log.Error().Err(closeErr).Msg("failed to close database")
 		}
 	}
+	if serveFailure != nil {
+		log.Fatal().Err(serveFailure).Msg("server error")
+	}
 
 	log.Info().Msg("serving stopped")
+}
+
+func expectedServeError(err error) bool {
+	return err == nil ||
+		errors.Is(err, http.ErrServerClosed) ||
+		errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, cmux.ErrServerClosed) ||
+		errors.Is(err, cmux.ErrListenerClosed) ||
+		errors.Is(err, grpc.ErrServerStopped)
 }
 
 func buildRepository(cfg config.Config) (repository.Repository, *sql.DB, error) {

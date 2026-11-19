@@ -142,6 +142,10 @@ func (v *Verifier) Resolve(r *http.Request) (string, State) {
 	return id, StateOK
 }
 
+func (v *Verifier) VerifyToken(value string) (string, error) {
+	return v.verify(value)
+}
+
 func UserIDFromContext(ctx context.Context) string {
 	id, _ := ctx.Value(userIDKey).(string)
 	return id
