@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+
+	"github.com/voidrunr/go-url-shortener/internal/pool"
 )
 
 var gzipWriterPool = sync.Pool{
@@ -14,6 +16,12 @@ var gzipWriterPool = sync.Pool{
 		return w
 	},
 }
+
+// compressPool recycles compressResponseWriter wrappers, which are
+// allocated once per request with no other purpose.
+var compressPool = pool.New(func() *compressResponseWriter {
+	return &compressResponseWriter{}
+})
 
 func acquireGzipWriter(dst io.Writer) *gzip.Writer {
 	gz := gzipWriterPool.Get().(*gzip.Writer)
@@ -31,6 +39,15 @@ type compressResponseWriter struct {
 	http.ResponseWriter
 	writer *gzip.Writer
 	status int
+}
+
+func (crw *compressResponseWriter) Reset() {
+	if crw.writer != nil {
+		releaseGzipWriter(crw.writer)
+	}
+	crw.ResponseWriter = nil
+	crw.writer = nil
+	crw.status = 0
 }
 
 func (crw *compressResponseWriter) compressed() bool {
@@ -82,12 +99,9 @@ func Gzip(next http.Handler) http.Handler {
 		}
 
 		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-			crw := &compressResponseWriter{ResponseWriter: w}
-			defer func() {
-				if crw.writer != nil {
-					releaseGzipWriter(crw.writer)
-				}
-			}()
+			crw := compressPool.Get()
+			crw.ResponseWriter = w
+			defer compressPool.Put(crw)
 			next.ServeHTTP(crw, r)
 			return
 		}
