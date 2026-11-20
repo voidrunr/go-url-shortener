@@ -1,9 +1,12 @@
 package config
 
 import (
+	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -25,7 +28,7 @@ func clearEnv(t *testing.T) {
 	for _, name := range []string{
 		"SERVER_ADDRESS", "BASE_URL", "FILE_STORAGE_PATH", "DATABASE_DSN",
 		"SECRET_KEY", "TOKEN_TTL", "AUDIT_FILE", "AUDIT_URL", "PPROF_ADDRESS",
-		"ENABLE_HTTPS", "CONFIG",
+		"ENABLE_HTTPS", "TRUSTED_SUBNET", "CONFIG",
 	} {
 		t.Setenv(name, "")
 	}
@@ -565,4 +568,150 @@ func TestParseTrustedSubnet(t *testing.T) {
 			t.Errorf("TrustedSubnet = %q, want config file value", cfg.TrustedSubnet)
 		}
 	})
+}
+
+func TestOptionsMetadata(t *testing.T) {
+	flags := make(map[string]bool, len(options))
+	envs := make(map[string]bool, len(options))
+	jsonNames := make(map[string]bool, len(options))
+
+	fs := flag.NewFlagSet("test", flag.ContinueOnError)
+	for _, opt := range options {
+		if opt.flagName == "" || opt.jsonName == "" || opt.usage == "" {
+			t.Errorf("incomplete description for option %q", opt.flagName)
+		}
+		if opt.register == nil || opt.applyFile == nil || opt.applyEnv == nil || opt.restore == nil || opt.value == nil {
+			t.Errorf("missing hook for option %q", opt.flagName)
+			continue
+		}
+		if flags[opt.flagName] {
+			t.Errorf("duplicate flag name %q", opt.flagName)
+		}
+		flags[opt.flagName] = true
+		if opt.envName != "" {
+			if envs[opt.envName] {
+				t.Errorf("duplicate env name %q", opt.envName)
+			}
+			envs[opt.envName] = true
+		}
+		if jsonNames[opt.jsonName] {
+			t.Errorf("duplicate json name %q", opt.jsonName)
+		}
+		jsonNames[opt.jsonName] = true
+
+		opt.register(fs, &Config{})
+	}
+
+	registered := make(map[string]bool)
+	fs.VisitAll(func(f *flag.Flag) { registered[f.Name] = true })
+	for name := range flags {
+		if !registered[name] {
+			t.Errorf("flag %q is described but not registered", name)
+		}
+	}
+	if len(registered) != len(flags) {
+		t.Errorf("registered %d flags, want %d", len(registered), len(flags))
+	}
+}
+
+func optionTestStrings(t *testing.T, opt option, value any) (string, string, string) {
+	t.Helper()
+	switch value.(type) {
+	case string:
+		return "file-" + opt.flagName, "flag-" + opt.flagName, "env-" + opt.flagName
+	case int:
+		return "101", "202", "303"
+	case time.Duration:
+		return "1h", "2h", "3h"
+	case bool:
+		return "true", "false", "true"
+	default:
+		t.Fatalf("unsupported option type %T", value)
+		return "", "", ""
+	}
+}
+
+func optionTestJSON(t *testing.T, value any, raw string) json.RawMessage {
+	t.Helper()
+	switch value.(type) {
+	case string, time.Duration:
+		return json.RawMessage(strconv.Quote(raw))
+	case int, bool:
+		return json.RawMessage(raw)
+	default:
+		t.Fatalf("unsupported option type %T", value)
+		return nil
+	}
+}
+
+func TestOptionPrecedence(t *testing.T) {
+	for _, opt := range options {
+		t.Run(opt.flagName, func(t *testing.T) {
+			kind := opt.value(&Config{})
+			fileRaw, flagRaw, envRaw := optionTestStrings(t, opt, kind)
+			fileJSON := optionTestJSON(t, kind, fileRaw)
+			path := writeConfigFile(t, fmt.Sprintf("{%q: %s}", opt.jsonName, fileJSON))
+
+			wantFile := Config{}
+			if err := opt.applyFile(&wantFile, fileJSON); err != nil {
+				t.Fatalf("applyFile: %v", err)
+			}
+			wantFlag := Config{}
+			if err := opt.applyEnv(&wantFlag, flagRaw); err != nil {
+				t.Fatalf("applyEnv flag value: %v", err)
+			}
+			wantEnv := Config{}
+			if err := opt.applyEnv(&wantEnv, envRaw); err != nil {
+				t.Fatalf("applyEnv env value: %v", err)
+			}
+
+			check := func(cfg, want Config) {
+				t.Helper()
+				if got := opt.value(&cfg); got != opt.value(&want) {
+					t.Errorf("value = %v, want %v", got, opt.value(&want))
+				}
+			}
+
+			resetFlags(t)
+			clearEnv(t)
+			os.Args = []string{"testsrv"}
+			cfg, err := Parse()
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+			check(cfg, defaultConfig())
+
+			resetFlags(t)
+			clearEnv(t)
+			os.Args = []string{"testsrv", "-c", path}
+			cfg, err = Parse()
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+			check(cfg, wantFile)
+
+			resetFlags(t)
+			clearEnv(t)
+			os.Args = []string{"testsrv", "-c", path, "-" + opt.flagName + "=" + flagRaw}
+			cfg, err = Parse()
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+			check(cfg, wantFlag)
+
+			if opt.envName == "" {
+				return
+			}
+
+			resetFlags(t)
+			clearEnv(t)
+			os.Args = []string{"testsrv", "-c", path, "-" + opt.flagName + "=" + flagRaw}
+			t.Setenv(opt.envName, envRaw)
+			cfg, err = Parse()
+			if err != nil {
+				t.Fatalf("Parse() error = %v", err)
+			}
+			check(cfg, wantEnv)
+		})
+	}
 }

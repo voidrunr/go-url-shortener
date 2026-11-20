@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -18,28 +17,29 @@ type Config struct {
 	AuditFile        string
 	AuditURL         string
 	PprofAddress     string
+	TrustedSubnet    string
 	CollisionRetries int
 	TokenTTL         time.Duration
 	EnableHTTPS      bool
-	TrustedSubnet    string
+}
+
+func defaultConfig() Config {
+	return Config{
+		ServerAddress:    "localhost:8080",
+		BaseURL:          "http://localhost:8080",
+		CollisionRetries: 5,
+		SecretKey:        "ChangeThisStringImportant",
+		TokenTTL:         24 * time.Hour,
+	}
 }
 
 func Parse() (Config, error) {
-	cfg := Config{}
+	cfg := defaultConfig()
 
 	var configPath string
-	flag.StringVar(&cfg.ServerAddress, "a", "localhost:8080", "address to run HTTP server on")
-	flag.StringVar(&cfg.BaseURL, "b", "http://localhost:8080", "base URL for shortened links")
-	flag.IntVar(&cfg.CollisionRetries, "m", 5, "max code generation attempts (0 or -1 for unlimited)")
-	flag.StringVar(&cfg.FileStoragePath, "f", "", "file path for URL storage")
-	flag.StringVar(&cfg.DatabaseDSN, "d", "", "database DSN")
-	flag.StringVar(&cfg.SecretKey, "secret-key", "ChangeThisStringImportant", "secret key for signing auth cookies")
-	flag.DurationVar(&cfg.TokenTTL, "token-ttl", 24*time.Hour, "auth token lifetime")
-	flag.StringVar(&cfg.AuditFile, "audit-file", "", "path to file sink for audit events")
-	flag.StringVar(&cfg.AuditURL, "audit-url", "", "URL of remote sink for audit events")
-	flag.StringVar(&cfg.PprofAddress, "pprof-address", "", "address for the pprof debug server (empty = disabled)")
-	flag.BoolVar(&cfg.EnableHTTPS, "s", false, "enable HTTPS with an in-memory self-signed certificate")
-	flag.StringVar(&cfg.TrustedSubnet, "t", "", "trusted subnet in CIDR notation for /api/internal/stats (empty = deny all)")
+	for _, opt := range options {
+		opt.register(flag.CommandLine, &cfg)
+	}
 	flag.StringVar(&configPath, "c", "", "path to JSON config file")
 	flag.StringVar(&configPath, "config", "", "path to JSON config file")
 	flag.Parse()
@@ -53,63 +53,36 @@ func Parse() (Config, error) {
 	}
 
 	if configPath != "" {
-		if err := applyFile(&cfg, configPath); err != nil {
+		fields, err := loadFile(configPath)
+		if err != nil {
 			return cfg, err
 		}
-	}
-
-	// Explicitly passed flags take priority over the config file values.
-	reapply := map[string]func(){
-		"a":             func() { cfg.ServerAddress = snapshot.ServerAddress },
-		"b":             func() { cfg.BaseURL = snapshot.BaseURL },
-		"m":             func() { cfg.CollisionRetries = snapshot.CollisionRetries },
-		"f":             func() { cfg.FileStoragePath = snapshot.FileStoragePath },
-		"d":             func() { cfg.DatabaseDSN = snapshot.DatabaseDSN },
-		"secret-key":    func() { cfg.SecretKey = snapshot.SecretKey },
-		"token-ttl":     func() { cfg.TokenTTL = snapshot.TokenTTL },
-		"audit-file":    func() { cfg.AuditFile = snapshot.AuditFile },
-		"audit-url":     func() { cfg.AuditURL = snapshot.AuditURL },
-		"pprof-address": func() { cfg.PprofAddress = snapshot.PprofAddress },
-		"s":             func() { cfg.EnableHTTPS = snapshot.EnableHTTPS },
-		"t":             func() { cfg.TrustedSubnet = snapshot.TrustedSubnet },
-	}
-	for name, apply := range reapply {
-		if explicit[name] {
-			apply()
+		for _, opt := range options {
+			raw, ok := fields[opt.jsonName]
+			if !ok || string(raw) == "null" {
+				continue
+			}
+			if err := opt.applyFile(&cfg, raw); err != nil {
+				return cfg, fmt.Errorf("parse %s %q from config file %q: %w", opt.jsonName, raw, configPath, err)
+			}
 		}
 	}
 
-	env := map[string]*string{
-		"SERVER_ADDRESS":    &cfg.ServerAddress,
-		"BASE_URL":          &cfg.BaseURL,
-		"FILE_STORAGE_PATH": &cfg.FileStoragePath,
-		"DATABASE_DSN":      &cfg.DatabaseDSN,
-		"SECRET_KEY":        &cfg.SecretKey,
-		"AUDIT_FILE":        &cfg.AuditFile,
-		"AUDIT_URL":         &cfg.AuditURL,
-		"PPROF_ADDRESS":     &cfg.PprofAddress,
-		"TRUSTED_SUBNET":    &cfg.TrustedSubnet,
-	}
-	for name, target := range env {
-		if val := os.Getenv(name); val != "" {
-			*target = val
+	for _, opt := range options {
+		if explicit[opt.flagName] {
+			opt.restore(&cfg, snapshot)
 		}
 	}
 
-	if val := os.Getenv("TOKEN_TTL"); val != "" {
-		ttl, err := time.ParseDuration(val)
-		if err != nil {
-			return cfg, fmt.Errorf("parse TOKEN_TTL %q: %w", val, err)
+	for _, opt := range options {
+		if opt.envName == "" {
+			continue
 		}
-		cfg.TokenTTL = ttl
-	}
-
-	if val := os.Getenv("ENABLE_HTTPS"); val != "" {
-		enabled, err := strconv.ParseBool(val)
-		if err != nil {
-			return cfg, fmt.Errorf("parse ENABLE_HTTPS %q: %w", val, err)
+		if value := os.Getenv(opt.envName); value != "" {
+			if err := opt.applyEnv(&cfg, value); err != nil {
+				return cfg, fmt.Errorf("parse %s %q: %w", opt.envName, value, err)
+			}
 		}
-		cfg.EnableHTTPS = enabled
 	}
 
 	if cfg.EnableHTTPS {
@@ -117,54 +90,4 @@ func Parse() (Config, error) {
 	}
 
 	return cfg, nil
-}
-
-func applyFile(cfg *Config, path string) error {
-	fc, err := loadFile(path)
-	if err != nil {
-		return err
-	}
-
-	if fc.ServerAddress != nil {
-		cfg.ServerAddress = *fc.ServerAddress
-	}
-	if fc.BaseURL != nil {
-		cfg.BaseURL = *fc.BaseURL
-	}
-	if fc.CollisionRetries != nil {
-		cfg.CollisionRetries = *fc.CollisionRetries
-	}
-	if fc.FileStoragePath != nil {
-		cfg.FileStoragePath = *fc.FileStoragePath
-	}
-	if fc.DatabaseDSN != nil {
-		cfg.DatabaseDSN = *fc.DatabaseDSN
-	}
-	if fc.SecretKey != nil {
-		cfg.SecretKey = *fc.SecretKey
-	}
-	if fc.TokenTTL != nil {
-		ttl, err := time.ParseDuration(*fc.TokenTTL)
-		if err != nil {
-			return fmt.Errorf("parse token_ttl %q from config file %q: %w", *fc.TokenTTL, path, err)
-		}
-		cfg.TokenTTL = ttl
-	}
-	if fc.AuditFile != nil {
-		cfg.AuditFile = *fc.AuditFile
-	}
-	if fc.AuditURL != nil {
-		cfg.AuditURL = *fc.AuditURL
-	}
-	if fc.PprofAddress != nil {
-		cfg.PprofAddress = *fc.PprofAddress
-	}
-	if fc.EnableHTTPS != nil {
-		cfg.EnableHTTPS = *fc.EnableHTTPS
-	}
-	if fc.TrustedSubnet != nil {
-		cfg.TrustedSubnet = *fc.TrustedSubnet
-	}
-
-	return nil
 }
