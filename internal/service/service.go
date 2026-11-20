@@ -49,6 +49,12 @@ func NewWithDeleter(repo Repository, baseURL string, collisionRetries int, flush
 	}
 }
 
+// Close flushes pending asynchronous deletions to the repository. Safe to
+// call more than once.
+func (srv *URLService) Close() {
+	srv.deleter.stop()
+}
+
 const codeAlphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"
 
 func generateCode(n int) (string, error) {

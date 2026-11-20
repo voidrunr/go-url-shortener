@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
+	"crypto/tls"
 	"database/sql"
 	"fmt"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -18,11 +23,18 @@ import (
 	"github.com/voidrunr/go-url-shortener/internal/handler"
 	"github.com/voidrunr/go-url-shortener/internal/repository"
 	"github.com/voidrunr/go-url-shortener/internal/service"
+	"github.com/voidrunr/go-url-shortener/internal/tlscert"
 )
 
 var buildVersion = "N/A"
 var buildDate = "N/A"
 var buildCommit = "N/A"
+
+const (
+	shutdownTimeout   = 10 * time.Second
+	readHeaderTimeout = 5 * time.Second
+	idleTimeout       = 60 * time.Second
+)
 
 func main() {
 	fmt.Printf("Build version: %s\n", buildVersion)
@@ -45,18 +57,10 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("failed to create repository")
 	}
-	if db != nil {
-		defer db.Close()
-	}
 
 	svc := service.New(repo, cfg.BaseURL, cfg.CollisionRetries)
 
 	emitter := audit.NewEmitter()
-	defer func() {
-		if closeErr := emitter.Close(); closeErr != nil {
-			log.Error().Err(closeErr).Msg("failed to close audit emitter")
-		}
-	}()
 	if cfg.AuditFile != "" {
 		emitter.Subscribe(audit.NewFileSink(cfg.AuditFile))
 	}
@@ -75,21 +79,105 @@ func main() {
 	}
 	hlr := handler.New(svc, opts...)
 
-	log.Info().Str("address", cfg.ServerAddress).Msg("serving")
-
+	var pprofSrv *http.Server
 	if cfg.PprofAddress != "" {
+		pprofSrv = &http.Server{
+			Addr:              cfg.PprofAddress,
+			ReadHeaderTimeout: readHeaderTimeout,
+			IdleTimeout:       idleTimeout,
+		}
+		log.Info().Str("address", cfg.PprofAddress).Msg("pprof server")
 		go func() {
-			log.Info().Str("address", cfg.PprofAddress).Msg("pprof server")
-			if listenErr := http.ListenAndServe(cfg.PprofAddress, nil); listenErr != nil {
+			if listenErr := pprofSrv.ListenAndServe(); listenErr != nil && listenErr != http.ErrServerClosed {
 				log.Error().Err(listenErr).Msg("pprof server error")
 			}
 		}()
 	}
 
-	err = http.ListenAndServe(cfg.ServerAddress, hlr.Router())
-	if err != nil {
-		log.Fatal().Err(err).Msg("server error")
+	srv := &http.Server{
+		Addr:              cfg.ServerAddress,
+		Handler:           hlr.Router(),
+		ReadHeaderTimeout: readHeaderTimeout,
+		IdleTimeout:       idleTimeout,
 	}
+	if cfg.EnableHTTPS {
+		cert, err := tlscert.SelfSignedCertificate()
+		if err != nil {
+			log.Fatal().Err(err).Msg("failed to generate self-signed certificate")
+		}
+		srv.TLSConfig = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+		}
+	}
+
+	serveErr := make(chan error, 1)
+	go func() {
+		if cfg.EnableHTTPS {
+			log.Info().Str("address", cfg.ServerAddress).Msg("serving https")
+			serveErr <- srv.ListenAndServeTLS("", "")
+			return
+		}
+		serveErr <- srv.ListenAndServe()
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+
+	shutdown := make(chan os.Signal, 1)
+	go func() {
+		shutdown <- <-quit
+		forceExit(<-quit)
+	}()
+
+	select {
+	case sig := <-shutdown:
+		log.Info().Str("signal", sig.String()).Msg("shutting down")
+	case err := <-serveErr:
+		if err != nil && err != http.ErrServerClosed {
+			log.Fatal().Err(err).Msg("server error")
+		}
+		log.Fatal().Msg("server stopped unexpectedly")
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		log.Error().Err(err).Msg("graceful shutdown timed out, forcing close")
+		_ = srv.Close()
+	}
+	if err := <-serveErr; err != nil && err != http.ErrServerClosed {
+		log.Error().Err(err).Msg("server error")
+	}
+
+	svc.Close()
+	if closeErr := emitter.Close(); closeErr != nil {
+		log.Error().Err(closeErr).Msg("failed to close audit emitter")
+	}
+	if db != nil {
+		if closeErr := db.Close(); closeErr != nil {
+			log.Error().Err(closeErr).Msg("failed to close database")
+		}
+	}
+
+	if pprofSrv != nil {
+		pprofCtx, cancelPprof := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancelPprof()
+		if err := pprofSrv.Shutdown(pprofCtx); err != nil {
+			log.Error().Err(err).Msg("pprof server shutdown timed out, forcing close")
+			_ = pprofSrv.Close()
+		}
+	}
+
+	log.Info().Msg("serving stopped")
+}
+
+func forceExit(sig os.Signal) {
+	log.Warn().Str("signal", sig.String()).Msg("second signal, forcing exit")
+	signum, ok := sig.(syscall.Signal)
+	if !ok {
+		signum = syscall.SIGTERM
+	}
+	os.Exit(128 + int(signum))
 }
 
 func buildRepository(cfg config.Config) (repository.Repository, *sql.DB, error) {

@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -18,45 +19,73 @@ type Config struct {
 	PprofAddress     string
 	CollisionRetries int
 	TokenTTL         time.Duration
+	EnableHTTPS      bool
+}
+
+func defaultConfig() Config {
+	return Config{
+		ServerAddress:    "localhost:8080",
+		BaseURL:          "http://localhost:8080",
+		CollisionRetries: 5,
+		SecretKey:        "ChangeThisStringImportant",
+		TokenTTL:         24 * time.Hour,
+	}
 }
 
 func Parse() (Config, error) {
-	cfg := Config{}
+	cfg := defaultConfig()
 
-	flag.StringVar(&cfg.ServerAddress, "a", "localhost:8080", "address to run HTTP server on")
-	flag.StringVar(&cfg.BaseURL, "b", "http://localhost:8080", "base URL for shortened links")
-	flag.IntVar(&cfg.CollisionRetries, "m", 5, "max code generation attempts (0 or -1 for unlimited)")
-	flag.StringVar(&cfg.FileStoragePath, "f", "", "file path for URL storage")
-	flag.StringVar(&cfg.DatabaseDSN, "d", "", "database DSN")
-	flag.StringVar(&cfg.SecretKey, "secret-key", "ChangeThisStringImportant", "secret key for signing auth cookies")
-	flag.DurationVar(&cfg.TokenTTL, "token-ttl", 24*time.Hour, "auth token lifetime")
-	flag.StringVar(&cfg.AuditFile, "audit-file", "", "path to file sink for audit events")
-	flag.StringVar(&cfg.AuditURL, "audit-url", "", "URL of remote sink for audit events")
-	flag.StringVar(&cfg.PprofAddress, "pprof-address", "", "address for the pprof debug server (empty = disabled)")
+	var configPath string
+	for _, opt := range options {
+		opt.register(flag.CommandLine, &cfg)
+	}
+	flag.StringVar(&configPath, "c", "", "path to JSON config file")
+	flag.StringVar(&configPath, "config", "", "path to JSON config file")
 	flag.Parse()
 
-	env := map[string]*string{
-		"SERVER_ADDRESS":    &cfg.ServerAddress,
-		"BASE_URL":          &cfg.BaseURL,
-		"FILE_STORAGE_PATH": &cfg.FileStoragePath,
-		"DATABASE_DSN":      &cfg.DatabaseDSN,
-		"SECRET_KEY":        &cfg.SecretKey,
-		"AUDIT_FILE":        &cfg.AuditFile,
-		"AUDIT_URL":         &cfg.AuditURL,
-		"PPROF_ADDRESS":     &cfg.PprofAddress,
+	snapshot := cfg
+	explicit := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+
+	if val := os.Getenv("CONFIG"); val != "" {
+		configPath = val
 	}
-	for name, target := range env {
-		if val := os.Getenv(name); val != "" {
-			*target = val
+
+	if configPath != "" {
+		fields, err := loadFile(configPath)
+		if err != nil {
+			return cfg, err
+		}
+		for _, opt := range options {
+			raw, ok := fields[opt.jsonName]
+			if !ok || string(raw) == "null" {
+				continue
+			}
+			if err := opt.applyFile(&cfg, raw); err != nil {
+				return cfg, fmt.Errorf("parse %s %q from config file %q: %w", opt.jsonName, raw, configPath, err)
+			}
 		}
 	}
 
-	if val := os.Getenv("TOKEN_TTL"); val != "" {
-		ttl, err := time.ParseDuration(val)
-		if err != nil {
-			return cfg, fmt.Errorf("parse TOKEN_TTL %q: %w", val, err)
+	for _, opt := range options {
+		if explicit[opt.flagName] {
+			opt.restore(&cfg, snapshot)
 		}
-		cfg.TokenTTL = ttl
+	}
+
+	for _, opt := range options {
+		if opt.envName == "" {
+			continue
+		}
+		if value := os.Getenv(opt.envName); value != "" {
+			if err := opt.applyEnv(&cfg, value); err != nil {
+				return cfg, fmt.Errorf("parse %s %q: %w", opt.envName, value, err)
+			}
+		}
+	}
+
+	if cfg.EnableHTTPS {
+		cfg.BaseURL = strings.Replace(cfg.BaseURL, "http://", "https://", 1)
 	}
 
 	return cfg, nil
