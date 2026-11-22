@@ -28,7 +28,7 @@ func clearEnv(t *testing.T) {
 	for _, name := range []string{
 		"SERVER_ADDRESS", "BASE_URL", "FILE_STORAGE_PATH", "DATABASE_DSN",
 		"SECRET_KEY", "TOKEN_TTL", "AUDIT_FILE", "AUDIT_URL", "PPROF_ADDRESS",
-		"ENABLE_HTTPS", "CONFIG",
+		"ENABLE_HTTPS", "TRUSTED_SUBNET", "CONFIG",
 	} {
 		t.Setenv(name, "")
 	}
@@ -503,6 +503,71 @@ func TestParseConfigFileInvalidTokenTTL(t *testing.T) {
 	if _, err := Parse(); err == nil {
 		t.Fatal("Parse() error = nil, want error for invalid token_ttl")
 	}
+}
+
+func TestParseTrustedSubnet(t *testing.T) {
+	t.Run("default empty", func(t *testing.T) {
+		resetFlags(t)
+		clearEnv(t)
+
+		cfg, err := Parse()
+		if err != nil {
+			t.Fatalf("Parse() error = %v", err)
+		}
+
+		if cfg.TrustedSubnet != "" {
+			t.Errorf("TrustedSubnet = %q, want empty by default", cfg.TrustedSubnet)
+		}
+	})
+
+	t.Run("flag -t", func(t *testing.T) {
+		resetFlags(t)
+		clearEnv(t)
+
+		os.Args = []string{"testsrv", "-t", "192.168.1.0/24"}
+
+		cfg, err := Parse()
+		if err != nil {
+			t.Fatalf("Parse() error = %v", err)
+		}
+
+		if cfg.TrustedSubnet != "192.168.1.0/24" {
+			t.Errorf("TrustedSubnet = %q", cfg.TrustedSubnet)
+		}
+	})
+
+	t.Run("env overrides flag", func(t *testing.T) {
+		resetFlags(t)
+
+		os.Args = []string{"testsrv", "-t", "192.168.1.0/24"}
+		t.Setenv("TRUSTED_SUBNET", "10.0.0.0/8")
+
+		cfg, err := Parse()
+		if err != nil {
+			t.Fatalf("Parse() error = %v", err)
+		}
+
+		if cfg.TrustedSubnet != "10.0.0.0/8" {
+			t.Errorf("TrustedSubnet = %q, want env to win", cfg.TrustedSubnet)
+		}
+	})
+
+	t.Run("config file", func(t *testing.T) {
+		resetFlags(t)
+		clearEnv(t)
+
+		path := writeConfigFile(t, `{"trusted_subnet": "172.16.0.0/12"}`)
+		os.Args = []string{"testsrv", "-c", path}
+
+		cfg, err := Parse()
+		if err != nil {
+			t.Fatalf("Parse() error = %v", err)
+		}
+
+		if cfg.TrustedSubnet != "172.16.0.0/12" {
+			t.Errorf("TrustedSubnet = %q, want config file value", cfg.TrustedSubnet)
+		}
+	})
 }
 
 func TestOptionsMetadata(t *testing.T) {

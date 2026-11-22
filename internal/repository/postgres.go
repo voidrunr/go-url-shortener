@@ -202,3 +202,11 @@ func (repo *PostgresRepository) DeleteBatch(ctx context.Context, userID string, 
 	_, err := repo.db.ExecContext(ctx, query, userID, codes)
 	return err
 }
+
+func (repo *PostgresRepository) Stats(ctx context.Context) (urls, users int, err error) {
+	row := repo.db.QueryRowContext(ctx, `SELECT COUNT(*), COUNT(DISTINCT user_id) FROM shortener_urls`)
+	if err := row.Scan(&urls, &users); err != nil {
+		return 0, 0, fmt.Errorf("select stats: %w", err)
+	}
+	return urls, users, nil
+}

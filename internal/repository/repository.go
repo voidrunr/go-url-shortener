@@ -32,4 +32,5 @@ type Repository interface {
 	Get(ctx context.Context, code string) (model.URL, error)
 	GetByUser(ctx context.Context, userID string) ([]model.URL, error)
 	DeleteBatch(ctx context.Context, userID string, codes []string) error
+	Stats(ctx context.Context) (urls, users int, err error)
 }

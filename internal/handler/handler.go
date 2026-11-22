@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"strings"
 	"time"
@@ -29,6 +30,7 @@ type Shortener interface {
 	Resolve(string) (string, error)
 	ListByUser(ctx context.Context, userID string) ([]model.URL, error)
 	Delete(string, []string) error
+	Stats(ctx context.Context) (urls, users int, err error)
 }
 
 type Pinger interface {
@@ -70,13 +72,22 @@ func WithAudit(e *audit.Emitter) Option {
 	}
 }
 
+// WithTrustedSubnet restricts /api/internal/stats to client IPs from prefix
+// carried in the X-Real-IP header. A zero-value prefix denies all requests.
+func WithTrustedSubnet(prefix netip.Prefix) Option {
+	return func(hlr *URLHandler) {
+		hlr.trustedSubnet = prefix
+	}
+}
+
 type URLHandler struct {
-	logger  zerolog.Logger
-	svc     Shortener
-	pinger  Pinger
-	auth    *auth.Signer
-	audit   *audit.Emitter
-	baseURL string
+	logger        zerolog.Logger
+	svc           Shortener
+	pinger        Pinger
+	auth          *auth.Signer
+	audit         *audit.Emitter
+	baseURL       string
+	trustedSubnet netip.Prefix
 }
 
 func New(svc Shortener, opts ...Option) *URLHandler {
@@ -100,6 +111,7 @@ func (hlr *URLHandler) Router() http.Handler {
 	r.Post("/", hlr.handleShorten)
 	r.Post("/api/shorten", hlr.handleAPIShorten)
 	r.Post("/api/shorten/batch", hlr.handleAPIShortenBatch)
+	r.Get("/api/internal/stats", hlr.handleInternalStats)
 	r.Get("/api/user/urls", hlr.handleUserURLs)
 	r.Delete("/api/user/urls", hlr.handleDeleteUserURLs)
 	r.Get("/", hlr.handleEmptyCode)
@@ -140,6 +152,52 @@ func (hlr *URLHandler) handlePing(w http.ResponseWriter, r *http.Request) {
 
 func (hlr *URLHandler) handleEmptyCode(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, http.StatusText(http.StatusBadRequest), http.StatusBadRequest)
+}
+
+type internalStatsResponse struct {
+	URLs  int `json:"urls"`
+	Users int `json:"users"`
+}
+
+// clientInTrustedSubnet reports whether the client IP from the X-Real-IP
+// header belongs to the trusted subnet. An unset trusted subnet denies all
+// clients.
+func (hlr *URLHandler) clientInTrustedSubnet(r *http.Request) bool {
+	if !hlr.trustedSubnet.IsValid() {
+		return false
+	}
+
+	ip := r.Header.Get("X-Real-IP")
+	if ip == "" {
+		return false
+	}
+
+	addr, err := netip.ParseAddr(ip)
+	if err != nil {
+		return false
+	}
+
+	return hlr.trustedSubnet.Contains(addr)
+}
+
+func (hlr *URLHandler) handleInternalStats(w http.ResponseWriter, r *http.Request) {
+	if !hlr.clientInTrustedSubnet(r) {
+		hlr.logger.Warn().Str("ip", r.Header.Get("X-Real-IP")).Msg("request to internal stats from untrusted client")
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return
+	}
+
+	urls, users, err := hlr.svc.Stats(r.Context())
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(internalStatsResponse{URLs: urls, Users: users}); err != nil {
+		hlr.logger.Error().Err(err).Msg("failed to encode response")
+	}
 }
 
 // bodyPool recycles bytes.Buffers used to read request bodies; their

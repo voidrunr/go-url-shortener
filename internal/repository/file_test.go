@@ -243,3 +243,22 @@ func TestFileRepository_LegacyArrayFormat(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "bob", got2.UserID)
 }
+
+func TestFileRepository_Stats(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "stats.json")
+	repo, err := NewFile(path)
+	require.NoError(t, err)
+
+	urls, users, err := repo.Stats(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 0, urls)
+	require.Equal(t, 0, users)
+
+	require.NoError(t, repo.Write(context.Background(), model.URL{Code: "a", Original: "https://one.example", UserID: "user-1"}))
+	require.NoError(t, repo.Write(context.Background(), model.URL{Code: "b", Original: "https://two.example", UserID: "user-2"}))
+
+	urls, users, err = repo.Stats(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, 2, urls)
+	require.Equal(t, 2, users)
+}

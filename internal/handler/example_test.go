@@ -34,6 +34,10 @@ func (exampleShortener) Delete(string, []string) error {
 	return nil
 }
 
+func (exampleShortener) Stats(context.Context) (urls, users int, err error) {
+	return 0, 0, nil
+}
+
 type exampleAuditSink struct{}
 
 func (exampleAuditSink) Write(ev audit.Event) error {

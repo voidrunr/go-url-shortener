@@ -587,3 +587,14 @@ func TestClose_IsIdempotent(t *testing.T) {
 		t.Errorf("deleteBatchCalls = %d after double Close, want <= 1", repo.deleteBatchCalls)
 	}
 }
+
+func (r *stubRepo) Stats(ctx context.Context) (urls, users int, err error) {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
+	usersByID := make(map[string]struct{}, len(r.urls))
+	for _, u := range r.urls {
+		usersByID[u.UserID] = struct{}{}
+	}
+	return len(r.urls), len(usersByID), nil
+}

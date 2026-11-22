@@ -4,9 +4,12 @@ import (
 	"context"
 	"crypto/tls"
 	"database/sql"
+	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	_ "net/http/pprof"
+	"net/netip"
 	"os"
 	"os/signal"
 	"syscall"
@@ -14,12 +17,16 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/soheilhy/cmux"
+	"google.golang.org/grpc"
 
+	pb "github.com/voidrunr/go-url-shortener/api/shortener"
 	"github.com/voidrunr/go-url-shortener/internal/audit"
 	"github.com/voidrunr/go-url-shortener/internal/auth"
 	"github.com/voidrunr/go-url-shortener/internal/config"
 	"github.com/voidrunr/go-url-shortener/internal/database"
 	"github.com/voidrunr/go-url-shortener/internal/database/migrations"
+	"github.com/voidrunr/go-url-shortener/internal/grpcserver"
 	"github.com/voidrunr/go-url-shortener/internal/handler"
 	"github.com/voidrunr/go-url-shortener/internal/repository"
 	"github.com/voidrunr/go-url-shortener/internal/service"
@@ -52,6 +59,10 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("invalid auth configuration")
 	}
+	verifier, err := auth.NewVerifier(cfg.SecretKey)
+	if err != nil {
+		log.Fatal().Err(err).Msg("invalid auth configuration")
+	}
 
 	repo, db, err := buildRepository(cfg)
 	if err != nil {
@@ -73,6 +84,13 @@ func main() {
 		handler.WithBaseURL(cfg.BaseURL),
 		handler.WithLogger(log.Logger),
 		handler.WithAudit(emitter),
+	}
+	if cfg.TrustedSubnet != "" {
+		trustedSubnet, err := netip.ParsePrefix(cfg.TrustedSubnet)
+		if err != nil {
+			log.Fatal().Err(err).Msg("invalid trusted subnet configuration")
+		}
+		opts = append(opts, handler.WithTrustedSubnet(trustedSubnet))
 	}
 	if db != nil {
 		opts = append(opts, handler.WithPinger(db))
@@ -100,24 +118,52 @@ func main() {
 		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
 	}
+
+	var tlsConfig *tls.Config
 	if cfg.EnableHTTPS {
 		cert, err := tlscert.SelfSignedCertificate()
 		if err != nil {
 			log.Fatal().Err(err).Msg("failed to generate self-signed certificate")
 		}
-		srv.TLSConfig = &tls.Config{
+		tlsConfig = &tls.Config{
 			Certificates: []tls.Certificate{cert},
+			NextProtos:   []string{"h2", "http/1.1"},
 		}
 	}
 
-	serveErr := make(chan error, 1)
+	listener, err := net.Listen("tcp", cfg.ServerAddress)
+	if err != nil {
+		log.Fatal().Err(err).Msg("failed to listen")
+	}
+	var serveListener net.Listener = listener
+	if tlsConfig != nil {
+		serveListener = tls.NewListener(listener, tlsConfig)
+	}
+
+	mux := cmux.New(serveListener)
+	grpcListener := mux.MatchWithWriters(cmux.HTTP2MatchHeaderFieldSendSettings("content-type", "application/grpc"))
+	httpListener := mux.Match(cmux.HTTP1Fast(), cmux.HTTP2())
+
+	grpcServer := grpc.NewServer(grpc.ChainUnaryInterceptor(
+		grpcserver.UnaryLogger(log.Logger),
+		grpcserver.UnaryRecovery(log.Logger),
+	))
+	pb.RegisterShortenerServiceServer(grpcServer, grpcserver.New(svc, verifier, cfg.BaseURL, emitter, log.Logger))
+
+	serveErr := make(chan error, 3)
 	go func() {
 		if cfg.EnableHTTPS {
 			log.Info().Str("address", cfg.ServerAddress).Msg("serving https")
-			serveErr <- srv.ListenAndServeTLS("", "")
-			return
+		} else {
+			log.Info().Str("address", cfg.ServerAddress).Msg("serving http")
 		}
-		serveErr <- srv.ListenAndServe()
+		serveErr <- mux.Serve()
+	}()
+	go func() {
+		serveErr <- srv.Serve(httpListener)
+	}()
+	go func() {
+		serveErr <- grpcServer.Serve(grpcListener)
 	}()
 
 	quit := make(chan os.Signal, 1)
@@ -129,15 +175,20 @@ func main() {
 		forceExit(<-quit)
 	}()
 
+	received := 0
+	var serveFailure error
 	select {
 	case sig := <-shutdown:
 		log.Info().Str("signal", sig.String()).Msg("shutting down")
 	case err := <-serveErr:
-		if err != nil && err != http.ErrServerClosed {
-			log.Fatal().Err(err).Msg("server error")
+		received = 1
+		if !expectedServeError(err) {
+			serveFailure = err
 		}
-		log.Fatal().Msg("server stopped unexpectedly")
 	}
+
+	mux.Close()
+	_ = listener.Close()
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
@@ -145,8 +196,11 @@ func main() {
 		log.Error().Err(err).Msg("graceful shutdown timed out, forcing close")
 		_ = srv.Close()
 	}
-	if err := <-serveErr; err != nil && err != http.ErrServerClosed {
-		log.Error().Err(err).Msg("server error")
+	grpcServer.GracefulStop()
+	for i := 0; i < 3-received; i++ {
+		if err := <-serveErr; !expectedServeError(err) {
+			log.Error().Err(err).Msg("server error")
+		}
 	}
 
 	svc.Close()
@@ -158,7 +212,6 @@ func main() {
 			log.Error().Err(closeErr).Msg("failed to close database")
 		}
 	}
-
 	if pprofSrv != nil {
 		pprofCtx, cancelPprof := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancelPprof()
@@ -167,8 +220,20 @@ func main() {
 			_ = pprofSrv.Close()
 		}
 	}
+	if serveFailure != nil {
+		log.Fatal().Err(serveFailure).Msg("server error")
+	}
 
 	log.Info().Msg("serving stopped")
+}
+
+func expectedServeError(err error) bool {
+	return err == nil ||
+		errors.Is(err, http.ErrServerClosed) ||
+		errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, cmux.ErrServerClosed) ||
+		errors.Is(err, cmux.ErrListenerClosed) ||
+		errors.Is(err, grpc.ErrServerStopped)
 }
 
 func forceExit(sig os.Signal) {

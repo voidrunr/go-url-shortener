@@ -17,6 +17,7 @@ type Config struct {
 	AuditFile        string
 	AuditURL         string
 	PprofAddress     string
+	TrustedSubnet    string
 	CollisionRetries int
 	TokenTTL         time.Duration
 	EnableHTTPS      bool

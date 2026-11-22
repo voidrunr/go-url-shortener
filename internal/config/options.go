@@ -179,4 +179,6 @@ var options = []option{
 		func(c *Config) *string { return &c.PprofAddress }),
 	boolOption("s", "ENABLE_HTTPS", "enable_https", "enable HTTPS with an in-memory self-signed certificate",
 		func(c *Config) *bool { return &c.EnableHTTPS }),
+	stringOption("t", "TRUSTED_SUBNET", "trusted_subnet", "trusted subnet in CIDR notation for /api/internal/stats (empty = deny all)",
+		func(c *Config) *string { return &c.TrustedSubnet }),
 }

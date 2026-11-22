@@ -301,6 +301,67 @@ func (_c *Shortener_Delete_Call) RunAndReturn(run func(string, []string) error) 
 	return _c
 }
 
+// Stats provides a mock function with given fields: _a0
+func (_m *Shortener) Stats(_a0 context.Context) (int, int, error) {
+	ret := _m.Called(_a0)
+
+	if len(ret) == 0 {
+		panic("no return value specified for Stats")
+	}
+
+	var r0 int
+	var r1 int
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context) (int, int, error)); ok {
+		return rf(_a0)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) int); ok {
+		r0 = rf(_a0)
+	} else {
+		r0 = ret.Get(0).(int)
+	}
+	if rf, ok := ret.Get(1).(func(context.Context) int); ok {
+		r1 = rf(_a0)
+	} else {
+		r1 = ret.Get(1).(int)
+	}
+	if rf, ok := ret.Get(2).(func(context.Context) error); ok {
+		r2 = rf(_a0)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// Shortener_Stats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Stats'
+type Shortener_Stats_Call struct {
+	*mock.Call
+}
+
+// Stats is a helper method to define mock.On call
+//   - _a0 context.Context
+func (_e *Shortener_Expecter) Stats(_a0 any) *Shortener_Stats_Call {
+	return &Shortener_Stats_Call{Call: _e.mock.On("Stats", _a0)}
+}
+
+func (_c *Shortener_Stats_Call) Run(run func(_a0 context.Context)) *Shortener_Stats_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *Shortener_Stats_Call) Return(_a0 int, _a1 int, _a2 error) *Shortener_Stats_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *Shortener_Stats_Call) RunAndReturn(run func(context.Context) (int, int, error)) *Shortener_Stats_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewShortener creates a new instance of Shortener. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewShortener(t interface {
